@@ -1,0 +1,102 @@
+package com.ravi.musicspot.ui
+
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
+
+/** One place for every icon the app uses (Material Symbols names from the Stitch HTML, mapped to Compose). */
+@Suppress("DEPRECATION")
+object Ic {
+    val Home = Icons.Rounded.Home
+    val Explore = Icons.Rounded.Explore
+    val Library = Icons.Rounded.LibraryMusic
+    val Settings = Icons.Rounded.Settings
+    val Play = Icons.Rounded.PlayArrow
+    val Pause = Icons.Rounded.Pause
+    val Next = Icons.Rounded.SkipNext
+    val Prev = Icons.Rounded.SkipPrevious
+    val Shuffle = Icons.Rounded.Shuffle
+    val Repeat = Icons.Rounded.Repeat
+    val RepeatOne = Icons.Rounded.RepeatOne
+    val Fav = Icons.Rounded.Favorite
+    val FavBorder = Icons.Rounded.FavoriteBorder
+    val More = Icons.Rounded.MoreVert
+    val Down = Icons.Rounded.KeyboardArrowDown
+    val Up = Icons.Rounded.KeyboardArrowUp
+    val Back = Icons.Rounded.ArrowBack
+    val Forward = Icons.Rounded.ArrowForward
+    val Search = Icons.Rounded.Search
+    val Mic = Icons.Rounded.Mic
+    val Close = Icons.Rounded.Close
+    val Queue = Icons.Rounded.QueueMusic
+    val Lyrics = Icons.Rounded.Lyrics
+    val Sleep = Icons.Rounded.Bedtime
+    val Share = Icons.Rounded.Share
+    val Download = Icons.Rounded.Download
+    val DownloadDone = Icons.Rounded.DownloadDone
+    val PlaylistAdd = Icons.Rounded.PlaylistAdd
+    val PlaylistPlay = Icons.Rounded.PlaylistPlay
+    val Eq = Icons.Rounded.Equalizer
+    val Tune = Icons.Rounded.Tune
+    val Wave = Icons.Rounded.GraphicEq
+    val Album = Icons.Rounded.Album
+    val Person = Icons.Rounded.Person
+    val Bell = Icons.Rounded.Notifications
+    val Add = Icons.Rounded.Add
+    val Remove = Icons.Rounded.Remove
+    val Check = Icons.Rounded.Check
+    val CheckCircle = Icons.Rounded.CheckCircle
+    val Refresh = Icons.Rounded.Refresh
+    val CloudOff = Icons.Rounded.CloudOff
+    val Wifi = Icons.Rounded.Wifi
+    val Cell = Icons.Rounded.SignalCellularAlt
+    val Headphones = Icons.Rounded.Headphones
+    val Bug = Icons.Rounded.BugReport
+    val History = Icons.Rounded.History
+    val Storage = Icons.Rounded.Storage
+    val Delete = Icons.Rounded.Delete
+    val Drag = Icons.Rounded.DragHandle
+    val TimerOff = Icons.Rounded.TimerOff
+    val Timer = Icons.Rounded.Timer
+    val Radio = Icons.Rounded.Radio
+    val Info = Icons.Rounded.Info
+    val Warning = Icons.Rounded.Warning
+    val Bluetooth = Icons.Rounded.Bluetooth
+    val Usb = Icons.Rounded.Usb
+    val Folder = Icons.Rounded.FolderOpen
+    val Verified = Icons.Rounded.Verified
+    val Lock = Icons.Rounded.Lock
+    val Copy = Icons.Rounded.ContentCopy
+    val Edit = Icons.Rounded.Edit
+    val Sort = Icons.Rounded.Sort
+    val Trending = Icons.Rounded.TrendingUp
+    val NorthEast = Icons.Rounded.NorthEast
+    val Speed = Icons.Rounded.Speed
+    val Memory = Icons.Rounded.Memory
+    val Surround = Icons.Rounded.SurroundSound
+    val Volume = Icons.Rounded.VolumeUp
+    val Note = Icons.Rounded.MusicNote
+    val Logout = Icons.Rounded.Logout
+    val Groups = Icons.Rounded.Groups
+    val PersonAdd = Icons.Rounded.PersonAdd
+    val Sync = Icons.Rounded.Sync
+    val Block = Icons.Rounded.Block
+    val Flag = Icons.Rounded.Flag
+    val Bolt = Icons.Rounded.Bolt
+    val Terminal = Icons.Rounded.Terminal
+    val Send = Icons.Rounded.Send
+    val Shield = Icons.Rounded.Shield
+    val Hearing = Icons.Rounded.Hearing
+    val Sparkle = Icons.Rounded.AutoAwesome
+    val Speaker = Icons.Rounded.Speaker
+    val Restore = Icons.Rounded.Restore
+    val Swap = Icons.Rounded.SwapHoriz
+    val Compare = Icons.Rounded.CompareArrows
+    val Power = Icons.Rounded.PowerSettingsNew
+    val Insights = Icons.Rounded.Insights
+    val Waves = Icons.Rounded.Waves
+    val Language = Icons.Rounded.Language
+    val Help = Icons.Rounded.HelpOutline
+    val OpenInNew = Icons.Rounded.OpenInNew
+    val Error = Icons.Rounded.ErrorOutline
+    val Pending = Icons.Rounded.HourglassTop
+}

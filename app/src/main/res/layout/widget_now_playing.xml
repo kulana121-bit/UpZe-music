@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_bg" android:clipToOutline="true">
+    <ImageView android:id="@+id/w_bg" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="centerCrop" android:importantForAccessibility="no" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="horizontal" android:gravity="center_vertical" android:padding="14dp">
+        <ImageView android:id="@+id/w_art" android:layout_width="84dp" android:layout_height="84dp"
+            android:scaleType="centerCrop" android:src="@mipmap/ic_launcher" android:contentDescription="Album art" />
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingStart="14dp">
+            <TextView android:id="@+id/w_brand" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="UPZE" android:textSize="10sp" android:letterSpacing="0.18" android:textColor="#B3FFFFFF" android:textStyle="bold" />
+            <TextView android:id="@+id/w_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="2dp" android:text="Nothing playing" android:textSize="16sp" android:textStyle="bold"
+                android:textColor="#FFFFFFFF" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/w_artist" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Tap to open UpZe" android:textSize="13sp" android:textColor="#CCFFFFFF" android:maxLines="1" android:ellipsize="end" />
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                android:orientation="horizontal" android:gravity="center_vertical">
+                <ImageButton android:id="@+id/w_prev" android:layout_width="40dp" android:layout_height="40dp"
+                    android:background="@drawable/widget_btn" android:src="@drawable/ic_w_prev" android:contentDescription="Previous" />
+                <ImageButton android:id="@+id/w_play" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="10dp"
+                    android:layout_marginEnd="10dp" android:background="@drawable/widget_play_bg" android:src="@drawable/ic_w_play" android:contentDescription="Play or pause" />
+                <ImageButton android:id="@+id/w_next" android:layout_width="40dp" android:layout_height="40dp"
+                    android:background="@drawable/widget_btn" android:src="@drawable/ic_w_next" android:contentDescription="Next" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

@@ -1,0 +1,33 @@
+# Gradle / build outputs
+.gradle/
+build/
+.kotlin/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+mapping.txt
+
+# Local configuration
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing material and secrets: never commit
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties
+*-keystore.properties
+signing.properties
+secrets.properties
+google-services.json
+
+# Logs
+*.log

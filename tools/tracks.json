@@ -1,0 +1,102 @@
+[
+ {
+  "res": "track_01",
+  "title": "Neon Afterglow",
+  "artist": "Lumen Drive",
+  "album": "City of Echoes",
+  "bpm": 104,
+  "style": "synthwave",
+  "durationMs": 44000,
+  "bytes": 412853
+ },
+ {
+  "res": "track_02",
+  "title": "Velvet Static",
+  "artist": "Mira Sol",
+  "album": "Night Bloom",
+  "bpm": 86,
+  "style": "lofi",
+  "durationMs": 42000,
+  "bytes": 464868
+ },
+ {
+  "res": "track_03",
+  "title": "Glass Horizon",
+  "artist": "Lumen Drive",
+  "album": "City of Echoes",
+  "bpm": 120,
+  "style": "house",
+  "durationMs": 40000,
+  "bytes": 371456
+ },
+ {
+  "res": "track_04",
+  "title": "Slow Tide",
+  "artist": "Oriel Bay",
+  "album": "Coastal Hours",
+  "bpm": 70,
+  "style": "ambient",
+  "durationMs": 48000,
+  "bytes": 388866
+ },
+ {
+  "res": "track_05",
+  "title": "Paper Lanterns",
+  "artist": "Kaito Rain",
+  "album": "Small Lights",
+  "bpm": 92,
+  "style": "acoustic",
+  "durationMs": 40000,
+  "bytes": 393277
+ },
+ {
+  "res": "track_06",
+  "title": "Midnight Circuit",
+  "artist": "Vanta Rose",
+  "album": "Low Orbit",
+  "bpm": 112,
+  "style": "synthwave",
+  "durationMs": 42000,
+  "bytes": 394275
+ },
+ {
+  "res": "track_07",
+  "title": "Coffee & Rain",
+  "artist": "Mira Sol",
+  "album": "Night Bloom",
+  "bpm": 78,
+  "style": "lofi",
+  "durationMs": 40000,
+  "bytes": 445544
+ },
+ {
+  "res": "track_08",
+  "title": "Aurora Steps",
+  "artist": "Oriel Bay",
+  "album": "Coastal Hours",
+  "bpm": 100,
+  "style": "acoustic",
+  "durationMs": 38000,
+  "bytes": 383324
+ },
+ {
+  "res": "track_09",
+  "title": "Pulse Theory",
+  "artist": "Vanta Rose",
+  "album": "Low Orbit",
+  "bpm": 124,
+  "style": "house",
+  "durationMs": 40000,
+  "bytes": 387322
+ },
+ {
+  "res": "track_10",
+  "title": "Lighthouse Hum",
+  "artist": "Kaito Rain",
+  "album": "Small Lights",
+  "bpm": 66,
+  "style": "ambient",
+  "durationMs": 46000,
+  "bytes": 366984
+ }
+]

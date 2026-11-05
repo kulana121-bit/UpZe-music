@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.0.0 updater: only the downloaded update APKs are shareable with the package installer. -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>
