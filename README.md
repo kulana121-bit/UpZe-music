@@ -69,14 +69,6 @@ downloads (WorkManager, Wi-Fi-only option) and an offline mode.
 - Built-in updater: checks GitHub Releases (at most every 12 h, or from Settings › About › Check for updates), shows
   the release notes, downloads the APK and hands it to the system installer.
 
-## Screenshots
-
-> Captured on a Lenovo Tab M8 (Android 10) during pre-1.0 development, before the rename to UpZe.
-
-| Now Playing | Sound engine | Appearance |
-|---|---|---|
-| <img src="docs/screenshots/now-playing.png" width="240" alt="Now Playing" /> | <img src="docs/screenshots/sound.png" width="240" alt="Sound settings" /> | <img src="docs/screenshots/appearance.png" width="240" alt="Appearance settings" /> |
-
 ## Download & install
 
 1. Open the [latest release](https://github.com/kulana121-bit/UpZe-music/releases) and download `UpZe-vX.Y.Z.apk`.
