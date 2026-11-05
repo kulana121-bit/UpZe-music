@@ -45,8 +45,8 @@ android {
         applicationId = "com.ravi.musicspot"
         minSdk = 26
         targetSdk = 37
-        versionCode = 21
-        versionName = "1.0.0"
+        versionCode = 22
+        versionName = "1.0.1"
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -127,6 +127,9 @@ dependencies {
     implementation(composeBom)
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
+    // 1.0.1: installs the bundled baseline profiles (Compose's own + src/main/baseline-prof.txt) at install time,
+    // so first launch and first scroll run AOT-compiled code instead of the interpreter on Android 7–12.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")

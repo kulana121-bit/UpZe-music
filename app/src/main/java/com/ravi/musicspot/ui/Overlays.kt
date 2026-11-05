@@ -83,6 +83,13 @@ object Pills {
     fun show(text: String) { queue.trySend(text) }
 }
 
+/**
+ * 1.0.1: the single entry point to the song-options sheet ([TrackMenuSheet]). The ⋮ buttons and every long-press on a
+ * song row/card call this, so both always show the same items and actions. It grows out of the pressed element
+ * (TapOrigin, see MotionSheet).
+ */
+fun openSongMenu(t: Track) { Menus.track = t }
+
 object Menus {
     var track by mutableStateOf<Track?>(null)
     var addToPlaylist by mutableStateOf<List<Track>?>(null)

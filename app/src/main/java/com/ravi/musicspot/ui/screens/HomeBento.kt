@@ -300,7 +300,7 @@ private fun BentoContinueTile(tracks: List<Track>, label: String, modifier: Modi
     val st by Graph.player.state.collectAsState()
     val isCurrent = st.current?.id == t.id
     Box(modifier.clip(BentoShape).background(c.surfaceContainerHigh)
-        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f) { if (isCurrent) Graph.player.toggle() else Graph.player.play(tracks, 0) }) {
+        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { if (isCurrent) Graph.player.toggle() else Graph.player.play(tracks, 0) }) {
         Artwork(t.artUrl, Modifier.fillMaxSize(), RectangleShape, t.title)
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent, Color.Black.copy(alpha = 0.85f)))))
         Text(label.uppercase(), style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp), color = Color.White.copy(alpha = 0.9f),
@@ -312,7 +312,7 @@ private fun BentoContinueTile(tracks: List<Track>, label: String, modifier: Modi
             }
             Spacer(Modifier.width(8.dp))
             Box(Modifier.size(42.dp).clip(CircleShape).background(Color.White)
-                .pressable(onClickLabel = if (isCurrent && st.playing) "Pause" else "Play ${t.title}", pressedScale = 0.88f) { if (isCurrent) Graph.player.toggle() else Graph.player.play(tracks, 0) },
+                .pressable(onClickLabel = if (isCurrent && st.playing) "Pause" else "Play ${t.title}", pressedScale = 0.88f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { if (isCurrent) Graph.player.toggle() else Graph.player.play(tracks, 0) },
                 contentAlignment = Alignment.Center) {
                 PlayPauseIcon(isCurrent && st.playing, Modifier.size(22.dp), tint = Color.Black)
             }
@@ -409,7 +409,7 @@ private fun BentoSongTile(tracks: List<Track>, i: Int, modifier: Modifier, big: 
     val t = tracks[i]
     val c = MaterialTheme.colorScheme
     Box(modifier.clip(if (big) BentoShape else BentoSmallShape).background(c.surfaceContainerHigh)
-        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f) { Graph.player.play(tracks, i) }) {
+        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }) {
         Artwork(t.artUrl, Modifier.fillMaxSize(), RectangleShape, t.title)
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color.Black.copy(alpha = 0.82f)))))
         Box(Modifier.align(Alignment.TopStart).padding(10.dp).clip(Ms.pill).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 3.dp)) {
@@ -437,7 +437,7 @@ private fun BentoRecentGrid(tracks: List<Track>, d: HomeDims, index: Int) {
                 row.forEachIndexed { j, t ->
                     val i = r * cols + j
                     Box(Modifier.weight(1f).aspectRatio(1f).clip(BentoSmallShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.95f) { Graph.player.play(tracks, i) }) {
+                        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.95f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }) {
                         Artwork(t.artUrl, Modifier.fillMaxSize(), RectangleShape, t.title)
                         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f)))))
                         Text(t.title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1,

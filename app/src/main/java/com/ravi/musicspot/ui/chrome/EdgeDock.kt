@@ -208,7 +208,7 @@ private fun SplitTabs(tabs: List<Tab>, selected: Tab, onSelect: (Tab) -> Unit, e
     val primary = MaterialTheme.colorScheme.primary
     val onPrimary = MaterialTheme.colorScheme.onPrimary
     val idle = MaterialTheme.colorScheme.onSurfaceVariant
-    Row(modifier.fillMaxSize().padding(horizontal = SPLIT_NAV_PAD), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxSize().liftBar().padding(horizontal = SPLIT_NAV_PAD), verticalAlignment = Alignment.CenterVertically) { // 1.0.1: liftBar
         tabs.forEach { t ->
             val on = t == selected
             val interaction = remember { MutableInteractionSource() }
@@ -227,7 +227,7 @@ private fun SplitTabs(tabs: List<Tab>, selected: Tab, onSelect: (Tab) -> Unit, e
                         .clip(CircleShape).background(primary),
                 )
                 AnimatedContent(on, transitionSpec = { com.ravi.musicspot.ui.motion.iconSwap(still) }, label = "splitIcon") { o ->
-                    Icon(if (o) t.selectedIcon else t.icon, t.label, Modifier.size(22.dp), tint = fg)
+                    Icon(if (o) t.selectedIcon else t.icon, t.label, Modifier.size(22.dp).liftSource(t, false, primary, dotAlpha = { 0f }, register = o == on), tint = fg) // 1.0.1: tab lift (accent circle marks the active tab)
                 }
             }
         }

@@ -132,6 +132,9 @@ fun PlayerScreen(
     val st by Graph.player.state.collectAsState()
     val t = st.current ?: return
     var pane by rememberSaveable { mutableStateOf<Pane?>(null) }
+    // 1.0.1: last full-screen page (Queue/Lyrics), reopened by a swipe up.
+    var lastFull by rememberSaveable { mutableStateOf(Pane.QUEUE) }
+    androidx.compose.runtime.LaunchedEffect(pane) { pane?.let { if (it.isFull()) lastFull = it } }
     var sleepSheet by remember { mutableStateOf(false) }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val c = MaterialTheme.colorScheme
@@ -147,7 +150,7 @@ fun PlayerScreen(
             // v2.0.5: animated gradient from the artwork's own colours, gliding to the next song's colours.
             ArtGradient(t.artUrl)
             // v2.0.8: soft, blurred artwork wash (real blur on Android 12+, a faint plain wash below that).
-            val blurOk = android.os.Build.VERSION.SDK_INT >= 31
+            val blurOk = android.os.Build.VERSION.SDK_INT >= 31 && !Graph.liteFx // 1.0.1: no full-screen blur on lite devices
             Artwork(t.artUrl, Modifier.fillMaxSize().then(if (blurOk) Modifier.blur(56.dp) else Modifier)
                 .graphicsLayer { alpha = if (blurOk) 0.42f else 0.16f; scaleX = 1.2f; scaleY = 1.2f }, androidx.compose.ui.graphics.RectangleShape)
             if (canvas != null) {
@@ -159,21 +162,20 @@ fun PlayerScreen(
         overlay = {
             Column(
                 Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
-                    .pointerInput(pane) {
-                        if (pane == null) {
-                            var total = 0f
-                            detectVerticalDragGestures(onDragStart = { total = 0f }, onDragEnd = { onDragEnd(total) }, onDragCancel = { onDragEnd(0f) }) { _, dy -> total += dy; onDrag(dy) }
-                        }
-                    },
+                    .playerVerticalGestures(enabled = pane == null, onDrag = onDrag, onDragEnd = onDragEnd, onSwipeUp = { pane = lastFull }), // 1.0.1: swipe up = full-screen pane
             ) {
-                TopRow(onCollapse, onMore = { Menus.track = t })
+                TopRow(onCollapse, more = {
+                    // 1.0.1: secondary actions live in the ⋮ menu (Related, Credits, Sleep, Sound & EQ, Song options).
+                    PlayerMoreButton(onSongOptions = { Menus.track = t }, onPane = { pane = it }, onOpenSleep = { sleepSheet = true }, onOpenEq = onOpenEq,
+                        buttonModifier = Modifier.glass(CircleShape))
+                }, sleepChip = { SleepChip({ sleepSheet = true }, Modifier.padding(end = 6.dp)) })
                 if (landscape) {
                     Row(Modifier.weight(1f).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                         CoverBox(t.artUrl, coverVisible, onCoverBounds, Modifier.fillMaxHeight().weight(1f))
                         Spacer(Modifier.width(24.dp))
                         // v2.0.9: landscape now shows the panes too (fade-through between controls and each pane).
                         val stillLand = com.ravi.musicspot.ui.motion.reducedMotion()
-                        AnimatedContent(pane, transitionSpec = { com.ravi.musicspot.ui.motion.MotionSpec.fadeThrough(stillLand) }, label = "paneLand", modifier = Modifier.weight(1.2f).fillMaxHeight()) { p ->
+                        AnimatedContent(pane.inPlayer(), transitionSpec = { com.ravi.musicspot.ui.motion.MotionSpec.fadeThrough(stillLand) }, label = "paneLand", modifier = Modifier.weight(1.2f).fillMaxHeight()) { p ->
                             if (p == null) Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) { Controls(onOpenSleep = { sleepSheet = true }, onOpenEq = onOpenEq) }
                             else Surface(Modifier.fillMaxSize().padding(vertical = 8.dp), shape = Ms.r28, color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
                                 Box(Modifier.fillMaxSize().glass(Ms.r28)) {
@@ -187,16 +189,17 @@ fun PlayerScreen(
                             }
                         }
                     }
-                    PaneTabs(pane) { pane = if (pane == it) null else it }
+                    PlayerEntryBar(onQueue = { pane = Pane.QUEUE }, onLyrics = { pane = Pane.LYRICS }) // 1.0.1: Up next / Lyrics entry points
                 } else {
                     // v2.0.6: opening a pane rises on the surface spring (shared axis Y), closing sinks back; switching between
                     // panes (Up next / Lyrics / Related / Credits) is a fade-through. Instant with Reduce motion.
                     val stillPane = com.ravi.musicspot.ui.motion.reducedMotion()
-                    AnimatedContent(pane, transitionSpec = {
+                    AnimatedContent(pane.inPlayer(), transitionSpec = {
                         val ms = com.ravi.musicspot.ui.motion.MotionSpec
                         when {
-                            initialState == null && targetState != null -> ms.containerRise(open = true, still = stillPane)
-                            initialState != null && targetState == null -> ms.containerRise(open = false, still = stillPane)
+                            // 1.0.1: Related / Credits (from the ⋮ menu) grow out of the tapped item and shrink back into it.
+                            initialState == null && targetState != null -> com.ravi.musicspot.ui.motion.TapOrigin.windowOrigin().let { o -> com.ravi.musicspot.ui.motion.TapOrigin.save("playerPane", o); ms.containerGrow(stillPane, o) }
+                            initialState != null && targetState == null -> ms.containerShrink(stillPane, com.ravi.musicspot.ui.motion.TapOrigin.take("playerPane"))
                             else -> ms.fadeThrough(stillPane)
                         }
                     }, label = "pane", modifier = Modifier.weight(1f)) { p ->
@@ -221,11 +224,13 @@ fun PlayerScreen(
                             }
                         }
                     }
-                    PaneTabs(pane) { pane = if (pane == it) null else it }
+                    PlayerEntryBar(onQueue = { pane = Pane.QUEUE }, onLyrics = { pane = Pane.LYRICS }) // 1.0.1: Up next / Lyrics entry points
                 }
             }
         },
     )
+    // 1.0.1: Queue / Lyrics open full screen over the player (pager + tabs, swipe down or Back to close).
+    FullScreenPane(pane, onSelect = { pane = it }, onClose = { pane = null })
     SleepSheet(sleepSheet) { sleepSheet = false }
 }
 
@@ -260,11 +265,10 @@ private fun Modifier.androidxDrawGradient(a: Color, b: Color, bg: Color, drift: 
     })
 
 @Composable
-private fun TopRow(onCollapse: () -> Unit, onMore: () -> Unit) {
+private fun TopRow(onCollapse: () -> Unit, more: @Composable () -> Unit, sleepChip: @Composable () -> Unit = {}) {
     val stream by Playback.stream.collectAsState()
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         val colI = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-        val moreI = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
         val stillTop = com.ravi.musicspot.ui.motion.reducedMotion()
         IconButton(onClick = onCollapse, interactionSource = colI, modifier = Modifier.pressScale(colI, 0.88f).glass(CircleShape)) { Icon(Icons.Rounded.KeyboardArrowDown, "Collapse player") }
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -275,7 +279,8 @@ private fun TopRow(onCollapse: () -> Unit, onMore: () -> Unit) {
                 }
             }
         }
-        IconButton(onClick = onMore, interactionSource = moreI, modifier = Modifier.pressScale(moreI, 0.88f).glass(CircleShape)) { Icon(Icons.Rounded.MoreVert, "More options") }
+        sleepChip()
+        more()
     }
 }
 
@@ -405,7 +410,6 @@ private fun Controls(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, capsule: @Co
     val stream by Playback.stream.collectAsState()
     val engine by EngineAudioProcessor.status.collectAsState()
     val err by Playback.error.collectAsState()
-    val sleepTick by Playback.sleepTick.collectAsState()
     val t = st.current ?: return
     val haptics = rememberHaptics()
     val liked = lib.liked.any { it.id == t.id }
@@ -448,7 +452,7 @@ private fun Controls(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, capsule: @Co
         }
         Spacer(Modifier.height(6.dp))
         ControlsSeek(st.durationMs) // v2.0.14b: seek slider + times read position in their own scope
-        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).staggerIn(2), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp).staggerIn(2), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             val stillRep2 = com.ravi.musicspot.ui.motion.reducedMotion()
             val shufI = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
             ModeButton(st.shuffle, shufI, onClick = { haptics.tick(); Graph.player.setShuffle(!st.shuffle) }) {
@@ -490,70 +494,11 @@ private fun Controls(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, capsule: @Co
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().staggerIn(3), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            val sleepOn = sleepTick >= 0 && Graph.player.sleepActive
-            val sleepI = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-            val eqI = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-            val stillPill = com.ravi.musicspot.ui.motion.reducedMotion()
-            val sleepTint by androidx.compose.animation.animateColorAsState(if (sleepOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, label = "sleepTint")
-            TextButton(onClick = onOpenSleep, interactionSource = sleepI, modifier = Modifier.pressScale(sleepI, 0.94f).glass(Ms.pill).animateContentSize(com.ravi.musicspot.ui.motion.MotionSpec.surfaceSpring())) {
-                Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp), tint = sleepTint)
-                Spacer(Modifier.width(6.dp))
-                AnimatedContent(if (sleepOn) sleepLabel() else "Sleep", transitionSpec = { com.ravi.musicspot.ui.motion.MotionSpec.sharedAxisY(true, stillPill) }, label = "sleepLbl") { Text(it, style = MaterialTheme.typography.labelMedium) }
-            }
-            TextButton(onClick = onOpenEq, interactionSource = eqI, modifier = Modifier.pressScale(eqI, 0.94f).glass(Ms.pill).animateContentSize(com.ravi.musicspot.ui.motion.MotionSpec.surfaceSpring())) {
-                Icon(Icons.Rounded.Equalizer, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-                AnimatedContent(if (engine.eqActive) "EQ on" else "Sound", transitionSpec = { com.ravi.musicspot.ui.motion.MotionSpec.fadeThrough(stillPill) }, label = "eqLbl") { Text(it, style = MaterialTheme.typography.labelMedium) }
-            }
-        }
+        // 1.0.1: Sleep and Sound moved to the ⋮ menu; the transport row gets the room.
+        Spacer(Modifier.height(4.dp))
     }
 }
 
-private fun sleepLabel(): String {
-    val s = Playback.sleep
-    return when (s.mode) {
-        com.ravi.musicspot.logic.SleepTimer.Mode.DURATION -> com.ravi.musicspot.logic.SleepTimer.format(s.remainingMs(System.currentTimeMillis()))
-        com.ravi.musicspot.logic.SleepTimer.Mode.END_OF_TRACK -> "End of song"
-        com.ravi.musicspot.logic.SleepTimer.Mode.END_OF_QUEUE -> "End of queue"
-        else -> "Sleep"
-    }
-}
-
-@Composable
-private fun PaneTabs(open: Pane?, onSelect: (Pane) -> Unit) {
-    // v2.0.11 classic pane bar: a slim frosted bar, M3 navigation-bar style. Each tab is an icon over its label; the
-    // active one gets a tonal pill behind the icon that stretches in (spring) and a bolder, tinted label. 56 dp tall.
-    val haptics = rememberHaptics()
-    val still = com.ravi.musicspot.ui.motion.reducedMotion()
-    val primary = MaterialTheme.colorScheme.primary
-    val c = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).height(56.dp)
-            .clip(Ms.r20).background(c.surfaceContainerHigh.copy(alpha = 0.55f))
-            .border(1.dp, Brush.verticalGradient(listOf(c.onSurface.copy(alpha = 0.12f), Color.Transparent)), Ms.r20)
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Pane.entries.forEach { p ->
-            val on = p == open
-            val ind by animateFloatAsState(if (on) 1f else 0f, if (still) androidx.compose.animation.core.snap() else spring(dampingRatio = 0.62f, stiffness = 260f), label = "tabInd")
-            val tint by androidx.compose.animation.animateColorAsState(if (on) primary else c.onSurfaceVariant, label = "tabTint")
-            val tabI = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-            Column(
-                Modifier.weight(1f).fillMaxHeight().pressScale(tabI, 0.92f).clip(Ms.r12)
-                    .clickable(interactionSource = tabI, indication = null, onClickLabel = p.label) { haptics.tick(); onSelect(p) },
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
-            ) {
-                Box(Modifier.size(width = 52.dp, height = 26.dp), contentAlignment = Alignment.Center) {
-                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = ind; scaleX = 0.35f + 0.65f * ind }.clip(Ms.pill).background(primary.copy(alpha = 0.22f)))
-                    Icon(p.icon, null, Modifier.size(19.dp), tint = tint)
-                }
-                Spacer(Modifier.height(2.dp))
-                Text(p.label, style = MaterialTheme.typography.labelSmall, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, maxLines = 1, color = tint)
-            }
-        }
-    }
-}
 
 /** Marquee for long titles; skipped under reduced motion. */
 @Composable

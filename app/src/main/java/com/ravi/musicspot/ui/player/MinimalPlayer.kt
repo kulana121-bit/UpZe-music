@@ -150,6 +150,9 @@ fun MinimalPlayerScreen(
     val st by Graph.player.state.collectAsState()
     val t = st.current ?: return
     var pane by rememberSaveable { mutableStateOf<Pane?>(null) }
+    // 1.0.1: last full-screen page (Queue/Lyrics), reopened by a swipe up.
+    var lastFull by rememberSaveable { mutableStateOf(Pane.QUEUE) }
+    androidx.compose.runtime.LaunchedEffect(pane) { pane?.let { if (it.isFull()) lastFull = it } }
     var sleepSheet by remember { mutableStateOf(false) }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val still = reducedMotion()
@@ -178,19 +181,14 @@ fun MinimalPlayerScreen(
         CompositionLocalProvider(LocalContentColor provides PosterInk, LocalBackdrop provides null, LocalHazeState provides null) {
             Box(
                 Modifier.fillMaxSize().background(bg)
-                    .pointerInput(pane) {
-                        if (pane == null) {
-                            var total = 0f
-                            detectVerticalDragGestures(onDragStart = { total = 0f }, onDragEnd = { onDragEnd(total) }, onDragCancel = { onDragEnd(0f) }) { _, dy -> total += dy; onDrag(dy) }
-                        }
-                    },
+                    .playerVerticalGestures(enabled = pane == null, onDrag = onDrag, onDragEnd = onDragEnd, onSwipeUp = { pane = lastFull }), // 1.0.1: swipe up = full-screen pane
             ) {
                 if (landscape) {
                     Row(Modifier.fillMaxSize()) {
                         PosterArt(t, coverVisible, onCoverBounds, bg, Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true), horizontalFade = true)
                         Column(Modifier.weight(1f).fillMaxHeight().statusBarsPadding().navigationBarsPadding()) {
                             PosterTopBar(onCollapse, onMore = { Menus.track = t })
-                            AnimatedContent(pane, transitionSpec = { MotionSpec.fadeThrough(still) }, label = "posterLand", modifier = Modifier.weight(1f).fillMaxWidth()) { p ->
+                            AnimatedContent(pane.inPlayer(), transitionSpec = { MotionSpec.fadeThrough(still) }, label = "posterLand", modifier = Modifier.weight(1f).fillMaxWidth()) { p ->
                                 if (p == null) BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
                                     val ring = (maxHeight * 0.42f).coerceIn(72.dp, 120.dp)
                                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceEvenly) {
@@ -204,7 +202,7 @@ fun MinimalPlayerScreen(
                         }
                     }
                 } else {
-                    AnimatedContent(pane, transitionSpec = {
+                    AnimatedContent(pane.inPlayer(), transitionSpec = {
                         when {
                             initialState == null && targetState != null -> MotionSpec.containerRise(open = true, still = still)
                             initialState != null && targetState == null -> MotionSpec.containerRise(open = false, still = still)
@@ -240,6 +238,8 @@ fun MinimalPlayerScreen(
                     }
                 }
             }
+            // 1.0.1: Queue / Lyrics open full screen over the player (pager + tabs, swipe down or Back to close).
+            FullScreenPane(pane, onSelect = { pane = it }, onClose = { pane = null })
             SleepSheet(sleepSheet) { sleepSheet = false }
         }
     }

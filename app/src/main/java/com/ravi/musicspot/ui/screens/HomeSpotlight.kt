@@ -329,7 +329,7 @@ private fun SpotlightTop(acc: Account?, online: Boolean, heroTracks: List<Track>
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Row(Modifier.height(48.dp).clip(Ms.pill).background(c.primary)
-                        .pressable(onClickLabel = if (isCurrent && st.playing) "Pause" else "Play ${t.title}", pressedScale = 0.94f) { playMain() }
+                        .pressable(onClickLabel = if (isCurrent && st.playing) "Pause" else "Play ${t.title}", pressedScale = 0.94f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { playMain() }
                         .padding(start = 16.dp, end = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                         PlayPauseIcon(isCurrent && st.playing, Modifier.size(24.dp), tint = c.onPrimary)
                         Spacer(Modifier.width(8.dp))
@@ -444,7 +444,7 @@ private fun SpotlightTopList(tracks: List<Track>, d: HomeDims, index: Int) {
         tracks.forEachIndexed { i, t ->
             val playing = st.current?.id == t.id
             Row(Modifier.fillMaxWidth().height(66.dp).clip(Ms.r12).background(if (playing) c.primary.copy(alpha = 0.12f) else Color.Transparent)
-                .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.98f) { if (playing) Graph.player.toggle() else Graph.player.play(tracks, i) }
+                .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.98f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { if (playing) Graph.player.toggle() else Graph.player.play(tracks, i) }
                 .padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${i + 1}", style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp), fontWeight = FontWeight.Black,
                     color = if (i == 0 || playing) c.primary else c.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.width(30.dp))
@@ -470,7 +470,7 @@ private fun SpotlightRecentCards(tracks: List<Track>, d: HomeDims, index: Int) {
     LazyRow(Modifier.staggerIn(index), contentPadding = PaddingValues(horizontal = d.gutter), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         itemsIndexed(tracks.take(20), key = { _, t -> "srp" + t.id }) { i, t ->
             Row(Modifier.width(w).height(h).clip(Ms.r20).background(c.surfaceContainerHigh)
-                .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f) { Graph.player.play(tracks, i) }, verticalAlignment = Alignment.CenterVertically) {
+                .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }, verticalAlignment = Alignment.CenterVertically) {
                 Artwork(t.artUrl, Modifier.size(h), RectangleShape, t.title)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {

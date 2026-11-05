@@ -1,0 +1,19 @@
+# 1.0.1: hand-written baseline profile for UpZe's startup and hottest UI paths (no device to generate one with
+# Macrobenchmark). AGP merges it into the APK; profileinstaller compiles it ahead of time on install.
+HSPLcom/ravi/musicspot/MainActivity;->**(**)**
+HSPLcom/ravi/musicspot/MusicSpotApp;->**(**)**
+HSPLcom/ravi/musicspot/Graph;->**(**)**
+HSPLcom/ravi/musicspot/ui/AppRootKt**;->**(**)**
+HSPLcom/ravi/musicspot/ui/Navigator;->**(**)**
+HSPLcom/ravi/musicspot/ui/chrome/**;->**(**)**
+HSPLcom/ravi/musicspot/ui/components/**;->**(**)**
+HSPLcom/ravi/musicspot/ui/screens/**;->**(**)**
+HSPLcom/ravi/musicspot/ui/Overlays**;->**(**)**
+HSPLcom/ravi/musicspot/ui/NavKt**;->**(**)**
+HSPLcom/ravi/musicspot/ui/player/**;->**(**)**
+HSPLcom/ravi/musicspot/ui/motion/**;->**(**)**
+HSPLcom/ravi/musicspot/ui/glass/**;->**(**)**
+HSPLcom/ravi/musicspot/ui/theme/**;->**(**)**
+HSPLcom/ravi/musicspot/data/SettingsRepo;->**(**)**
+HSPLcom/ravi/musicspot/data/AppSettings;->**(**)**
+Lcom/ravi/musicspot/**;

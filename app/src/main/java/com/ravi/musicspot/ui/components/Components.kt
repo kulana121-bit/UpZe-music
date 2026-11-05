@@ -6,6 +6,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -87,7 +88,7 @@ fun Artwork(url: String?, modifier: Modifier = Modifier, shape: Shape = Ms.r12, 
             // v2.0.14b: bucket the requested size and remember the request per (url, bucket) so the URL stays stable
             // while the size animates (cover morph). The bucket only grows per url, so a shrinking morph reuses the
             // already-loaded larger rendition instead of re-requesting a smaller one.
-            val bucket = artBucket(px)
+            val bucket = artBucket(px).let { if (Graph.liteFx) minOf(it, 480) else it } // 1.0.1: smaller decodes on lite devices
             val maxBucket = androidx.compose.runtime.remember(url) { IntArray(1) } // plain holder: no state write in composition
             if (bucket > maxBucket[0]) maxBucket[0] = bucket
             val reqBucket = maxBucket[0]
@@ -109,7 +110,7 @@ private fun artBucket(px: Int): Int = when { px <= 0 -> 0; px <= 120 -> 120; px 
  */
 fun sizedArtUrl(url: String, px: Int): String {
     if (px <= 0) return url
-    val bucket = when { px <= 160 -> 160; px <= 320 -> 320; px <= 544 -> 544; else -> 1080 }
+    val bucket = when { px <= 160 -> 160; px <= 320 -> 320; px <= 544 -> 544; else -> if (Graph.liteFx) 544 else 1080 } // 1.0.1: lite cap
     return when {
         ("googleusercontent.com" in url || "ggpht.com" in url) && Regex("=w\\d+-h\\d+").containsMatchIn(url) ->
             url.replace(Regex("=w\\d+-h\\d+"), "=w$bucket-h$bucket")
@@ -133,7 +134,10 @@ fun formatBytes(b: Long): String = when { b >= 1L shl 30 -> "%.2f GB".format(b /
 fun TrackRow(
     t: Track, onClick: () -> Unit, onMore: (() -> Unit)? = null, playing: Boolean = false, index: Int? = null,
     showArt: Boolean = true, trailing: (@Composable () -> Unit)? = null,
+    /** 1.0.1: long-press opens the same song-options sheet as ⋮ (pass null to turn it off). */
+    onLongPress: (() -> Unit)? = { com.ravi.musicspot.ui.openSongMenu(t) },
 ) {
+    val rowHaptics = com.ravi.musicspot.ui.motion.rememberHaptics()
     val downloads by Graph.downloads.items.collectAsState()
     val liked by Graph.library.data.collectAsState()
     val press = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -142,7 +146,9 @@ fun TrackRow(
         onSwipeRight = { Graph.player.playNext(t); com.ravi.musicspot.ui.Pills.show("Playing next") },
         onSwipeLeft = { Graph.player.addToQueue(listOf(t)); com.ravi.musicspot.ui.Pills.show("Added to queue") }) {
     Row(
-        Modifier.fillMaxWidth().pressScale(press, 0.98f).clickable(interactionSource = press, indication = androidx.compose.material3.ripple(), onClick = onClick).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 56.dp),
+        Modifier.fillMaxWidth().pressScale(press, 0.98f).combinedClickable(interactionSource = press, indication = androidx.compose.material3.ripple(), onClick = onClick,
+            onLongClickLabel = if (onLongPress != null) "Song options" else null,
+            onLongClick = onLongPress?.let { lp -> { rowHaptics.confirm(); lp() } }).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 56.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (index != null) Text("$index", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
@@ -187,7 +193,7 @@ fun CollectionCard(c: Collection, width: Dp = 152.dp, onClick: () -> Unit) {
 
 @Composable
 fun TrackCard(t: Track, width: Dp = 152.dp, onClick: () -> Unit, onLong: (() -> Unit)? = null) {
-    Column(Modifier.width(width).pressable(onClickLabel = "Play ${t.title}", onClick = onClick)) {
+    Column(Modifier.width(width).pressable(onClickLabel = "Play ${t.title}", onLongClick = onLong ?: { com.ravi.musicspot.ui.openSongMenu(t) }, onClick = onClick)) { // 1.0.1: long-press = song options
         Artwork(t.artUrl, Modifier.size(width), Ms.r16, t.title)
         Spacer(Modifier.height(8.dp))
         Text(t.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

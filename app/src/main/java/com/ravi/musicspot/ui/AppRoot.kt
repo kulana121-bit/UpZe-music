@@ -176,6 +176,8 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
 
                 fun drag(dy: Float) { scope.launch { sheet.progress.snapTo((sheet.progress.value - dy / heightPx).coerceIn(0f, 1f)) } }
                 val tabs = listOf(Tab.HOME, Tab.EXPLORE, Tab.LIBRARY, Tab.SETTINGS, Tab.SEARCH)
+                // 1.0.1: every dock / rail selects through here, so a new tab lifts out of the bar (TabLift) on all of them.
+                val selectTab: (Tab) -> Unit = { t -> if (t != nav.tab) com.ravi.musicspot.ui.chrome.TabLift.lift(t, scope, still); nav.select(t) }
 
                 GlassLayer(
                     Modifier.fillMaxSize(),
@@ -192,7 +194,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                         }
                     },
                     overlay = {
-                        if (wide) SideRail(tabs, nav.tab, { nav.select(it) }, Modifier.align(Alignment.CenterStart))
+                        if (wide) SideRail(tabs, nav.tab, selectTab, Modifier.align(Alignment.CenterStart))
                         val mini: @Composable () -> Unit = {
                             MiniPlayer(
                                 onOpen = { expand() },
@@ -209,7 +211,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                                     .padding(start = railWidth + CHROME_SIDE, end = CHROME_SIDE, bottom = navBottom + CHROME_BOTTOM).then(fadeWithPlayer),
                             ) { mini() }
                         } else if (settings.dockStyle == com.ravi.musicspot.data.DockStyle.CAPSULE) com.ravi.musicspot.ui.chrome.CapsuleDock(
-                            tabs = tabs, selected = nav.tab, onSelect = { nav.select(it) }, hasMini = hasMini,
+                            tabs = tabs, selected = nav.tab, onSelect = selectTab, hasMini = hasMini,
                             morph = { morphF.value }, hide = { hideF.value },
                             miniTarget = navHide.hidden && navMode == com.ravi.musicspot.data.NavBarMode.MINI,
                             onExpand = { navHide.show() },
@@ -221,7 +223,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                             onCoverBounds = { miniCover = it },
                             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + CHROME_BOTTOM).then(fadeWithPlayer),
                         ) else if (settings.dockStyle == com.ravi.musicspot.data.DockStyle.EDGE) com.ravi.musicspot.ui.chrome.EdgeDock(
-                            tabs = tabs, selected = nav.tab, onSelect = { nav.select(it) }, hasMini = hasMini,
+                            tabs = tabs, selected = nav.tab, onSelect = selectTab, hasMini = hasMini,
                             morph = { morphF.value }, hide = { hideF.value },
                             miniTarget = navHide.hidden && navMode == com.ravi.musicspot.data.NavBarMode.MINI,
                             onExpand = { navHide.show() },
@@ -233,7 +235,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                             onCoverBounds = { miniCover = it },
                             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + CHROME_BOTTOM).then(fadeWithPlayer),
                         ) else if (settings.dockStyle == com.ravi.musicspot.data.DockStyle.ISLAND) com.ravi.musicspot.ui.chrome.IslandDock(
-                            tabs = tabs, selected = nav.tab, onSelect = { nav.select(it) }, hasMini = hasMini,
+                            tabs = tabs, selected = nav.tab, onSelect = selectTab, hasMini = hasMini,
                             morph = { morphF.value }, hide = { hideF.value },
                             miniTarget = navHide.hidden && navMode == com.ravi.musicspot.data.NavBarMode.MINI,
                             onExpand = { navHide.show() },
@@ -245,7 +247,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                             onCoverBounds = { miniCover = it },
                             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + CHROME_BOTTOM).then(fadeWithPlayer),
                         ) else DockChrome(
-                            tabs = tabs, selected = nav.tab, onSelect = { nav.select(it) }, hasMini = hasMini,
+                            tabs = tabs, selected = nav.tab, onSelect = selectTab, hasMini = hasMini,
                             morph = { morphF.value }, hide = { hideF.value },
                             miniTarget = navHide.hidden && navMode == com.ravi.musicspot.data.NavBarMode.MINI,
                             onExpand = { navHide.show() },
@@ -253,6 +255,8 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + CHROME_BOTTOM).then(fadeWithPlayer),
                             miniPlayer = mini,
                         )
+                        // 1.0.1: the lifted tab bubble, above the dock, inside the glass layer (real blur on Android 12+).
+                        com.ravi.musicspot.ui.chrome.TabLiftOverlay(MaterialTheme.colorScheme.primary)
                     },
                 )
 
@@ -332,6 +336,22 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                     Route.SpotifyLogin -> SpotifyLoginScreen { nav.back() }
                     else -> {}
                 }
+                // 1.0.1: Customize and Your artists (from Settings) cover the dock and mini player, like the sign-in pages,
+                // so their own bottom buttons are reachable; they slide in/out on the page motion and return with nav.back().
+                val fullRoute = nav.current.takeIf { it == Route.Customize || it == Route.Artists }
+                androidx.compose.animation.AnimatedContent(
+                    targetState = fullRoute,
+                    transitionSpec = {
+                        if (initialState == null) { com.ravi.musicspot.ui.motion.TapOrigin.windowOrigin().also { o -> com.ravi.musicspot.ui.motion.TapOrigin.save("settingsFull", o) }.let { PageMotion.pushFrom(still, it) } } else if (targetState == null) PageMotion.popTo(still, com.ravi.musicspot.ui.motion.TapOrigin.take("settingsFull")) else MotionSpec.fadeThrough(still)
+                    },
+                    label = "settingsFull",
+                ) { r ->
+                    when (r) {
+                        Route.Customize -> com.ravi.musicspot.ui.setup.SetupFlow(fromSettings = true, onExit = { nav.back() })
+                        Route.Artists -> com.ravi.musicspot.ui.setup.ArtistsScreen(onBack = { nav.back() })
+                        else -> Box(Modifier.fillMaxSize())
+                    }
+                }
 
                 TrackMenuSheet(nav) { collapse() }
                 AddToPlaylistDialog()
@@ -357,9 +377,10 @@ private fun Pages(nav: Navigator, still: Boolean) {
     AnimatedContent(
         targetState = Triple(key.first, key.second, pageKey),
         transitionSpec = {
+            // 1.0.1: pushes grow out of the tapped row/card/button (TapOrigin) and Back shrinks the page into it.
             when (nav.lastDirection) {
-                1 -> PageMotion.push(still)
-                -1 -> PageMotion.pop(still)
+                1 -> { val o = com.ravi.musicspot.ui.motion.TapOrigin.windowOrigin(); com.ravi.musicspot.ui.motion.TapOrigin.save(targetState.third, o); PageMotion.pushFrom(still, o) }
+                -1 -> PageMotion.popTo(still, com.ravi.musicspot.ui.motion.TapOrigin.take(initialState.third))
                 else -> PageMotion.tab(still)
             }
         },
@@ -391,7 +412,7 @@ private fun RouteContent(r: Route) {
         Route.Saved -> SavedScreen()
         is Route.SettingsPage -> SettingsPageScreen(r.page)
         is Route.ShelfAll -> com.ravi.musicspot.ui.screens.ShelfAllScreen(r.shelf)
-        Route.GoogleLogin, Route.SpotifyLogin -> Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) // drawn by AppRoot
+        Route.GoogleLogin, Route.SpotifyLogin, Route.Customize, Route.Artists -> Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) // drawn by AppRoot
     }
 }
 

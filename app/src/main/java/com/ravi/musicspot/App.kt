@@ -87,6 +87,12 @@ object Graph {
     val online: StateFlow<Boolean> = _online
     @Volatile var metered = false; private set
     var lowEnd = false; private set
+    /**
+     * 1.0.1: "lite effects" tier: low-RAM devices plus phones/tablets with a small per-app heap (memoryClass <= 128 MB)
+     * or under ~1.6 GB of RAM (DeviceTier). Unlike [lowEnd] it does not force Reduce motion or solid glass; it only turns off the
+     * costly extras: list 3D depth, sheet/dialog container transforms (short fades instead), large artwork renditions.
+     */
+    var liteFx = false; private set
 
     @Volatile private var initStarted = false
 
@@ -101,6 +107,11 @@ object Graph {
         this.app = app
         val dir = app.filesDir
         lowEnd = guard("lowRam", false) { (app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).isLowRamDevice }
+        liteFx = lowEnd || guard("liteFx", false) {
+            val am = app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val mi = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+            com.ravi.musicspot.logic.DeviceTier.isLite(am.memoryClass, mi.totalMem)
+        }
         settings = SettingsRepo(dir)
         library = LibraryRepo(dir)
         playStats = com.ravi.musicspot.data.PlayStatsRepo(dir)
@@ -230,7 +241,7 @@ class MusicSpotApp : Application(), coil3.SingletonImageLoader.Factory {
      */
     override fun newImageLoader(context: coil3.PlatformContext): coil3.ImageLoader = coil3.ImageLoader.Builder(context)
         .components { add(coil3.network.okhttp.OkHttpNetworkFetcherFactory(callFactory = { com.ravi.musicspot.core.Http.client })) }
-        .memoryCache { coil3.memory.MemoryCache.Builder().maxSizePercent(context, 0.20).build() }
+        .memoryCache { coil3.memory.MemoryCache.Builder().maxSizePercent(context, if (Graph.liteFx) 0.15 else 0.20).build() } // 1.0.1: smaller on lite devices
         .diskCache { coil3.disk.DiskCache.Builder().directory(java.io.File(context.cacheDir, "image_cache").toOkioPath()).maxSizeBytes(200L * 1024 * 1024).build() }
         .crossfade(!Graph.lowEnd)
         .build()

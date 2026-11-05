@@ -182,7 +182,7 @@ private fun OrbTabs(tabs: List<Tab>, selected: Tab, onSelect: (Tab) -> Unit, ena
     val primary = MaterialTheme.colorScheme.primary
     val idle = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
     Row(
-        Modifier.fillMaxSize().padding(horizontal = ORB_PAD).drawBehind {
+        Modifier.fillMaxSize().liftBar().padding(horizontal = ORB_PAD).drawBehind { // 1.0.1: liftBar
             val n = tabs.size.coerceAtLeast(1)
             val slot = size.width / n
             val hlW = (min(slot, 52.dp.toPx()) - 4.dp.toPx()).coerceAtLeast(0f)
@@ -203,7 +203,7 @@ private fun OrbTabs(tabs: List<Tab>, selected: Tab, onSelect: (Tab) -> Unit, ena
                     .then(if (enabled) Modifier.clickable(interaction, null, onClickLabel = t.label, role = Role.Tab) { if (!on) haptics.tick(); onSelect(t) } else Modifier),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(if (on) t.selectedIcon else t.icon, t.label, Modifier.size(24.dp).offset(y = (-2).dp), tint = fg)
+                Icon(if (on) t.selectedIcon else t.icon, t.label, Modifier.size(24.dp).offset(y = (-2).dp).liftSource(t, on, primary, dotAlpha = { 0f }), tint = fg) // 1.0.1: tab lift (this dock draws its own dot)
             }
         }
     }

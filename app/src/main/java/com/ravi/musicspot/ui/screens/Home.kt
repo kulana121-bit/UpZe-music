@@ -363,7 +363,7 @@ internal fun QuickPicks(tracks: List<Track>, d: HomeDims, index: Int, rows: Int 
         flingBehavior = rememberSnapFlingBehavior(state),
     ) {
         itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
-            Row(Modifier.width(d.quickCol).height(rowH).clip(Ms.r12).pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f) { Graph.player.play(tracks, i) }.padding(horizontal = 4.dp),
+            Row(Modifier.width(d.quickCol).height(rowH).clip(Ms.r12).pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }.padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Artwork(t.artUrl, Modifier.size(48.dp), Ms.r8, null)
                 Spacer(Modifier.width(10.dp))
@@ -383,7 +383,7 @@ internal fun TrackShelf(tracks: List<Track>, w: Dp, d: HomeDims, index: Int) {
     val tracks = remember(tracks) { tracks.distinctBy { it.id } }
     LazyRow(Modifier.staggerIn(index), contentPadding = PaddingValues(horizontal = d.gutter), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
-            Column(Modifier.width(w).pressable(onClickLabel = "Play ${t.title}") { Graph.player.play(tracks, i) }) {
+            Column(Modifier.width(w).pressable(onClickLabel = "Play ${t.title}", onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }) {
                 Artwork(t.artUrl, Modifier.size(w).softShadow(Ms.r16), Ms.r16, t.title)
                 Spacer(Modifier.height(6.dp))
                 Text(t.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -460,7 +460,7 @@ fun ShelfAllScreen(shelf: Shelf) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(tracks.size, key = { "t" + tracks[it].id }) { i ->
                     val t = tracks[i]
-                    Column(Modifier.pressable(onClickLabel = "Play ${t.title}") { Graph.player.play(tracks, i) }) {
+                    Column(Modifier.pressable(onClickLabel = "Play ${t.title}", onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }) {
                         Artwork(t.artUrl, Modifier.fillMaxWidth().aspectRatio(1f), Ms.r16, t.title)
                         Spacer(Modifier.height(6.dp))
                         Text(t.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -504,7 +504,7 @@ private fun HomeHero(t: Track, label: String, d: HomeDims, onPlay: () -> Unit) {
         Modifier.fillMaxWidth().staggerIn(0).padding(horizontal = d.gutter, vertical = 8.dp)
             .softShadow(Ms.r20).clip(Ms.r20)
             .background(Brush.linearGradient(listOf(top, bottom)))
-            .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.98f) { if (isCurrent) Graph.player.toggle() else onPlay() }
+            .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.98f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { if (isCurrent) Graph.player.toggle() else onPlay() }
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -535,7 +535,7 @@ private fun RecentGrid(tracks: List<Track>, d: HomeDims, index: Int) {
             Row(Modifier.staggerIn(index + r), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { t ->
                     Row(Modifier.weight(1f).height(56.dp).clip(Ms.r12).background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f) { Graph.player.play(tracks, tracks.indexOf(t)) },
+                        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, tracks.indexOf(t)) },
                         verticalAlignment = Alignment.CenterVertically) {
                         Artwork(t.artUrl, Modifier.size(56.dp), androidx.compose.ui.graphics.RectangleShape, null)
                         Spacer(Modifier.width(10.dp))

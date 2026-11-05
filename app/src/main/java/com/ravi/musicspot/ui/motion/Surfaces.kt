@@ -10,6 +10,9 @@ package com.ravi.musicspot.ui.motion
 
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.MutableTransitionState
@@ -122,6 +125,8 @@ private fun OverlayWindow(onDismiss: () -> Unit, content: @Composable () -> Unit
 fun <T : Any> MotionSheet(item: T?, onDismiss: () -> Unit, content: @Composable ColumnScope.(T) -> Unit) {
     val (shown, vis) = rememberHeld(item) ?: return
     val still = reducedMotion()
+    // 1.0.1: where it was opened from (null when not opened by a tap, or on lite-effects devices: then it slides up).
+    val tap = remember(shown) { if (TapOrigin.freshTap() && !com.ravi.musicspot.Graph.liteFx) TapOrigin.point() else null }
     FocusBlurWhile(vis.targetState)
     OverlayWindow(onDismiss) {
         AnimatedVisibility(vis, enter = EnterTransition.None, exit = ExitTransition.None) {
@@ -156,7 +161,9 @@ fun <T : Any> MotionSheet(item: T?, onDismiss: () -> Unit, content: @Composable 
                 Column(
                     Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.statusBars).padding(top = 48.dp)
                         .widthIn(max = 640.dp).fillMaxWidth()
-                        .animateEnterExit(enter = MotionSpec.sheetIn(still), exit = MotionSpec.sheetOut(still))
+                        // 1.0.1: opened by a tap, the sheet grows out of the tapped row/button and shrinks back into it.
+                        .then(if (tap != null && !still) Modifier.animateEnterExit(enter = fadeIn(tween(MotionSpec.SHORT)), exit = fadeOut(tween(MotionSpec.EXIT, delayMillis = 60))).growFrom(this@AnimatedVisibility, tap, 0.55f)
+                            else Modifier.animateEnterExit(enter = MotionSpec.sheetIn(still), exit = MotionSpec.sheetOut(still)))
                         .graphicsLayer { translationY = drag }
                         .nestedScroll(connection)
                         .draggable(rememberDraggableState { dy -> drag = (drag + dy).coerceAtLeast(0f) }, Orientation.Vertical, onDragStopped = { v -> settle(v) })
@@ -176,6 +183,7 @@ fun <T : Any> MotionSheet(item: T?, onDismiss: () -> Unit, content: @Composable 
 fun <T : Any> MotionDialog(item: T?, onDismiss: () -> Unit, content: @Composable (T) -> Unit) {
     val (shown, vis) = rememberHeld(item) ?: return
     val still = reducedMotion()
+    val tap = remember(shown) { if (TapOrigin.freshTap() && !com.ravi.musicspot.Graph.liteFx) TapOrigin.point() else null }
     FocusBlurWhile(vis.targetState)
     OverlayWindow(onDismiss) {
         AnimatedVisibility(vis, enter = EnterTransition.None, exit = ExitTransition.None) {
@@ -188,7 +196,9 @@ fun <T : Any> MotionDialog(item: T?, onDismiss: () -> Unit, content: @Composable
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
-                        Modifier.animateEnterExit(enter = MotionSpec.dialogIn(still), exit = MotionSpec.dialogOut(still))
+                        // 1.0.1: grows out of the tapped element when opened by a tap.
+                        (if (tap != null && !still) Modifier.animateEnterExit(enter = fadeIn(tween(MotionSpec.SHORT)), exit = fadeOut(tween(MotionSpec.EXIT))).growFrom(this@AnimatedVisibility, tap, 0.7f)
+                            else Modifier.animateEnterExit(enter = MotionSpec.dialogIn(still), exit = MotionSpec.dialogOut(still)))
                             .pointerInput(Unit) { detectTapGestures { } },
                     ) { content(shown) }
                 }

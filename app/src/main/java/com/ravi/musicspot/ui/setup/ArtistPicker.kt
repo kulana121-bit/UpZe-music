@@ -17,6 +17,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -65,54 +70,62 @@ import kotlinx.coroutines.delay
  * cancels the previous search because LaunchedEffect restarts on the key).
  */
 @Composable
-fun ArtistPickerStep(modifier: Modifier = Modifier) {
+fun ArtistPickerStep(modifier: Modifier = Modifier, showTitle: Boolean = true) {
     val selected by SeedArtists.state.collectAsState()
     val online by Graph.online.collectAsState()
     val selectedIds = remember(selected) { selected.mapTo(HashSet()) { it.id } }
     var query by rememberSaveable { mutableStateOf("") }
-    var suggested by remember { mutableStateOf<List<SeedArtist>>(emptyList()) }
+    // 1.0.1: suggestions are cached in SeedArtists for the session, so leaving the step (the setup pager disposes
+    // off-screen pages), rotating, or reopening the picker from Settings no longer refetches ~13 network calls.
+    var suggested by remember { mutableStateOf(SeedArtists.cachedSuggestions) }
     var results by remember { mutableStateOf<List<SeedArtist>?>(null) }
     // v2.0.16: suggestions and search each own a loading flag; one finishing no longer hides the other's spinner.
     var loadingSug by remember { mutableStateOf(false) }
     var loadingSearch by remember { mutableStateOf(false) }
     val loading = loadingSug || loadingSearch
-    var error by remember { mutableStateOf<String?>(null) }
+    // 1.0.1: separate errors: a failed search no longer leaves its message (and Retry) on the suggestions view.
+    var sugError by remember { mutableStateOf<String?>(null) }
+    var searchError by remember { mutableStateOf<String?>(null) }
     var retry by remember { mutableIntStateOf(0) }
     val q = query.trim()
 
     LaunchedEffect(retry, online) {
         if (suggested.isNotEmpty()) return@LaunchedEffect
-        if (!online) { error = "You're offline. Connect to see artists."; return@LaunchedEffect }
-        loadingSug = true; error = null
+        if (!online) { sugError = "You're offline. Connect to see artists."; return@LaunchedEffect }
+        loadingSug = true; sugError = null
         try {
             suggested = SeedArtists.suggested(24)
-            if (suggested.isEmpty()) error = "Couldn't load artists right now."
+            if (suggested.isEmpty()) sugError = "Couldn't load artists right now." else SeedArtists.cachedSuggestions = suggested
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            error = "Couldn't load artists. Check your connection."
+            sugError = "Couldn't load artists. Check your connection."
         } finally { loadingSug = false }
     }
 
     LaunchedEffect(q, retry) {
+        searchError = null
         if (q.isEmpty()) { results = null; return@LaunchedEffect }
         delay(350)
         // v2.0.16: drop the previous query's results so they are not shown under the new query.
-        if (!Graph.online.value) { results = emptyList(); error = "You're offline. Connect to search artists."; return@LaunchedEffect }
-        loadingSearch = true; error = null
+        if (!Graph.online.value) { results = emptyList(); searchError = "You're offline. Connect to search artists."; return@LaunchedEffect }
+        loadingSearch = true
         try {
             results = SeedArtists.search(q)
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            results = emptyList(); error = "Search failed. Check your connection."
+            results = emptyList(); searchError = "Search failed. Check your connection."
         } finally { loadingSearch = false }
     }
+    val error = if (q.isNotEmpty()) searchError else sugError
 
     // Picked artists stay visible on top of the suggestions so they can be un-picked.
     val shown: List<SeedArtist> = results ?: (selected + suggested).distinctBy { it.id }
 
     Column(modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Spacer(Modifier.height(16.dp))
-        Text("Pick artists you love", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(4.dp))
-        Text("Optional — we'll tune Home to them", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (showTitle) {
+            Spacer(Modifier.height(16.dp))
+            Text("Pick artists you love", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text("Optional — we'll tune Home to them", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Spacer(Modifier.height(14.dp))
         OutlinedTextField(
             value = query, onValueChange = { query = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -151,7 +164,7 @@ fun ArtistPickerStep(modifier: Modifier = Modifier) {
                     contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    items(shown, key = { it.id }) { a -> ArtistBubble(a, a.id in selectedIds) { SeedArtists.toggle(a) } }
+                    items(shown, key = { it.id }, contentType = { "artist" }) { a -> ArtistBubble(a, a.id in selectedIds) { SeedArtists.toggle(a) } }
                 }
             }
         }
@@ -179,7 +192,31 @@ private fun ArtistBubble(a: SeedArtist, selected: Boolean, onClick: () -> Unit) 
         Spacer(Modifier.height(6.dp))
         Text(
             a.name, style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-            color = if (selected) accent else MaterialTheme.colorScheme.onSurface, modifier = Modifier.width(112.dp),
+            color = if (selected) accent else MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth(), // 1.0.1: was a fixed 112 dp, wider than a 96 dp cell
         )
+    }
+}
+
+/**
+ * 1.0.1: the artist picker as its own screen, opened from Settings (Appearance › Your artists and the Settings list).
+ * Selections are saved as they are tapped (SeedArtists), so Back and Done both keep them.
+ */
+@Composable
+fun ArtistsScreen(onBack: () -> Unit) {
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                Column(Modifier.weight(1f)) {
+                    Text("Your artists", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Home's “For you” follows the artists you pick", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = onBack) { Text("Done") }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                ArtistPickerStep(Modifier.widthIn(max = 900.dp), showTitle = false)
+            }
+        }
     }
 }

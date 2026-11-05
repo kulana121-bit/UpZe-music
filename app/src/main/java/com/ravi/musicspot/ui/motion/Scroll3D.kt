@@ -17,6 +17,14 @@ import kotlin.math.sign
  * @param focus where in the viewport rows sit flat (0 = top, 0.5 = centre, used by lyrics).
  * @param maxTilt rotationX in degrees at the edge of the viewport.
  */
+/** 1.0.1: shared flat-band sizes for [scroll3d]: rows that stay full size around the centre. */
+object Depth {
+    /** Carousels, Home rows and general lists: the centre ~3-4 items are flat. */
+    const val FLAT_LIST = 3.5f
+    /** Playlists, albums, track lists and the queue: the centre ~6-7 rows are flat. */
+    const val FLAT_TRACKS = 6.5f
+}
+
 @Composable
 fun Modifier.scroll3d(
     state: LazyListState,
@@ -27,8 +35,17 @@ fun Modifier.scroll3d(
     minAlpha: Float = 0.45f,
     /** Share of each half of the viewport that stays flat (track lists tilt only near the edges). */
     flat: Float = 0f,
+    /**
+     * 1.0.1: number of rows around the focus line that always stay flat (full size, no tilt, no fade), measured in
+     * this row's own height so the band is the same on a phone and an 8" tablet. 0 = use [flat] only (the lyrics drum).
+     * See [Depth] for the shared values.
+     */
+    flatRows: Float = 0f,
+    /** 1.0.1: lists turn the effect off on lite-effects devices ([com.ravi.musicspot.Graph.liteFx]); lyrics keep it. */
+    allowOnLite: Boolean = false,
 ): Modifier {
     if (reducedMotion()) return this
+    if (!allowOnLite && com.ravi.musicspot.Graph.liteFx) return this
     return this.graphicsLayer {
         val info = state.layoutInfo
         val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return@graphicsLayer
@@ -40,8 +57,8 @@ fun Modifier.scroll3d(
         // -1 at the top edge … 0 at the focus line … +1 at the bottom edge (clamped a little past).
         val half = if (center < focusY) (focusY - vpStart) else (vpEnd - focusY)
         val d = ((center - focusY) / half.coerceAtLeast(1f)).coerceIn(-1.2f, 1.2f)
-        val k = ((abs(d) - flat) / (1f - flat)).coerceAtLeast(0f)
-        val eased = k * k * (3f - 2f * k.coerceAtMost(1f))
+        // 1.0.1: widen the flat band to at least `flatRows` rows (half on each side of the focus line).
+        val eased = depthEase(d, flat, flatBandHalf(flatRows, item.size.toFloat(), half))
         rotationX = -sign(d) * maxTilt * eased.coerceAtMost(1f)
         val s = 1f - (1f - minScale) * eased.coerceAtMost(1f)
         scaleX = s; scaleY = s
@@ -50,4 +67,19 @@ fun Modifier.scroll3d(
         // Pivot on the edge nearer the focus line so rows hinge toward the centre, like a wheel.
         transformOrigin = TransformOrigin(0.5f, if (d < 0) 1f else 0f)
     }
+}
+
+/** 1.0.1: half of the flat band as a share of the half-viewport, for [flatRows] rows of [rowPx]; 0 when unused. */
+internal fun flatBandHalf(flatRows: Float, rowPx: Float, halfViewportPx: Float): Float =
+    if (flatRows > 0f) ((flatRows * rowPx / 2f) / halfViewportPx.coerceAtLeast(1f)).coerceIn(0f, 0.92f) else 0f
+
+/**
+ * Depth amount for a row at normalised distance [d] from the focus line: 0 inside the flat band (max of [flat] and
+ * [bandHalf]), easing (smoothstep) to 1 at the viewport edge. With bandHalf = 0 this is the v2.0.7 curve exactly
+ * (the lyrics drum is unchanged).
+ */
+internal fun depthEase(d: Float, flat: Float, bandHalf: Float): Float {
+    val f = maxOf(flat, bandHalf)
+    val k = ((abs(d) - f) / (1f - f)).coerceAtLeast(0f)
+    return k * k * (3f - 2f * k.coerceAtMost(1f))
 }

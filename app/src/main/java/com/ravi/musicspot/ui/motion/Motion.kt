@@ -27,6 +27,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
@@ -62,16 +63,24 @@ fun rememberHaptics(): Haptics {
     return remember(view) { Haptics(view) { Graph.settings.value.haptics } }
 }
 
-/** Sinks under the finger and springs back (iOS-like), with a light haptic tick. */
+/**
+ * Sinks under the finger and springs back (iOS-like), with a light haptic tick.
+ * 1.0.1: [onLongClick] (with a confirm haptic) is how song cards open the shared song-options sheet on long-press.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun Modifier.pressable(onClickLabel: String? = null, pressedScale: Float = 0.96f, onClick: () -> Unit): Modifier {
+fun Modifier.pressable(onClickLabel: String? = null, pressedScale: Float = 0.96f, onLongClick: (() -> Unit)? = null, onClick: () -> Unit): Modifier {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val still = reducedMotion()
     val scale by animateFloatAsState(if (pressed && !still) pressedScale else 1f, spring(dampingRatio = 0.55f, stiffness = 306f), label = "press")
     val h = rememberHaptics()
-    return this.graphicsLayer { scaleX = scale; scaleY = scale }
-        .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClickLabel = onClickLabel) { h.tick(); onClick() }
+    val layer = this.graphicsLayer { scaleX = scale; scaleY = scale }
+    return if (onLongClick == null) layer.clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClickLabel = onClickLabel) { h.tick(); onClick() }
+    else layer.combinedClickable(
+        interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClickLabel = onClickLabel,
+        onLongClickLabel = "Song options", onLongClick = { h.confirm(); onLongClick() },
+    ) { h.tick(); onClick() }
 }
 
 /**
@@ -156,6 +165,27 @@ object MotionSpec {
     }
 
     /**
+     * 1.0.1 container transform for pages and full-screen panes: the new screen grows out of [origin] (the tapped
+     * element, see TapOrigin) while the old one recedes slightly; [containerShrink] is the reverse for Back (the
+     * closing screen stays on top and shrinks into the element it came from). Lite-effects devices
+     * (Graph.liteFx) get a short fade-through instead; Reduce motion a plain quick fade.
+     */
+    fun containerGrow(still: Boolean, origin: TransformOrigin): ContentTransform {
+        if (still) return fadeIn(tween(196)) togetherWith fadeOut(tween(140))
+        if (com.ravi.musicspot.Graph.liteFx) return fadeIn(tween(180, delayMillis = 60)) togetherWith fadeOut(tween(90))
+        return (scaleIn(tween(MEDIUM, easing = emphasizedDecelerate), initialScale = 0.86f, transformOrigin = origin) +
+            fadeIn(tween(210, delayMillis = 30, easing = LinearEasing))) togetherWith
+            (scaleOut(tween(MEDIUM, easing = emphasized), targetScale = 0.96f) + fadeOut(tween(168, delayMillis = 60)))
+    }
+    fun containerShrink(still: Boolean, origin: TransformOrigin): ContentTransform {
+        if (still) return fadeIn(tween(196)) togetherWith fadeOut(tween(140))
+        if (com.ravi.musicspot.Graph.liteFx) return fadeIn(tween(180, delayMillis = 60)) togetherWith fadeOut(tween(90))
+        return ((scaleIn(tween(MEDIUM, easing = emphasizedDecelerate), initialScale = 0.96f) + fadeIn(tween(210, easing = LinearEasing))) togetherWith
+            (scaleOut(tween(EXIT, easing = emphasizedAccelerate), targetScale = 0.86f, transformOrigin = origin) + fadeOut(tween(EXIT, delayMillis = 40, easing = LinearEasing))))
+            .apply { targetContentZIndex = -1f }
+    }
+
+    /**
      * v2.0.7 player panes: a Material container transform rising out of the tab row. Opening, the pane grows from
      * 88% at its bottom edge on the surface spring while the artwork shrinks back toward the top; closing reverses
      * (the pane sinks into the tabs, accelerating, the artwork springs back from 94%).
@@ -191,6 +221,9 @@ object PageMotion {
      */
     fun push(still: Boolean): ContentTransform = MotionSpec.sharedAxisX(forward = true, still = still)
     fun pop(still: Boolean): ContentTransform = MotionSpec.sharedAxisX(forward = false, still = still)
+    /** 1.0.1: page push / pop as a container transform out of / back into the tapped element. */
+    fun pushFrom(still: Boolean, origin: androidx.compose.ui.graphics.TransformOrigin): ContentTransform = MotionSpec.containerGrow(still, origin)
+    fun popTo(still: Boolean, origin: androidx.compose.ui.graphics.TransformOrigin): ContentTransform = MotionSpec.containerShrink(still, origin)
     fun tab(still: Boolean): ContentTransform = if (still) fadeIn(tween(168)) togetherWith fadeOut(tween(126)) else MotionSpec.fadeThrough(false)
     val playerSpring = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 214f)
 }

@@ -92,6 +92,9 @@ import com.ravi.musicspot.ui.glass.glassSheet
 import com.ravi.musicspot.ui.motion.rememberHaptics
 import com.ravi.musicspot.ui.theme.Ms
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import kotlin.math.roundToInt
 
 @Composable
@@ -99,6 +102,8 @@ fun QueuePane() {
     val st by Graph.player.state.collectAsState()
     val list = rememberLazyListState(initialFirstVisibleItemIndex = st.index.coerceAtLeast(0))
     var dragging by remember { mutableIntStateOf(-1) }
+    // 1.0.1: a finger on a row's reorder handle: its long-press drags, so the row's long-press menu must not open.
+    var handleDown by remember { mutableStateOf(false) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val rowPx = with(androidx.compose.ui.platform.LocalDensity.current) { 68.dp.toPx() }
     val haptics = rememberHaptics()
@@ -137,18 +142,20 @@ fun QueuePane() {
             if (stillQ) list.scrollBy(d) else list.animateScrollBy(d, androidx.compose.animation.core.tween(1120, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)))
         }
         LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = bandPad)) {
-            itemsIndexed(st.queue, key = { i, t -> "$i-${t.id}" }) { i, t ->
+            itemsIndexed(st.queue, key = { i, t -> "$i-${t.id}" }, contentType = { _, _ -> "queueTrack" }) { i, t -> // 1.0.1: contentType
                 if (i == st.autoplayFrom) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.HorizontalDivider(Modifier.weight(1f))
                     Text("  Autoplay  ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     androidx.compose.material3.HorizontalDivider(Modifier.weight(1f))
                 }
                 val isDragged = i == dragging
-                Box(Modifier.zIndex(if (isDragged) 1f else 0f).then(if (dragging < 0) Modifier.scroll3d(list, i, maxTilt = 26f, minScale = 0.88f, minAlpha = 0.5f, flat = flatBand) else Modifier).graphicsLayer { translationY = if (isDragged) dragOffset else 0f; shadowElevation = if (isDragged) 12f else 0f }
+                Box(Modifier.zIndex(if (isDragged) 1f else 0f).then(if (dragging < 0) Modifier.scroll3d(list, i, maxTilt = 26f, minScale = 0.88f, minAlpha = 0.5f, flat = flatBand, flatRows = com.ravi.musicspot.ui.motion.Depth.FLAT_TRACKS) else Modifier).graphicsLayer { translationY = if (isDragged) dragOffset else 0f; shadowElevation = if (isDragged) 12f else 0f }
                     .background(if (isDragged) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)) {
-                    TrackRow(t, onClick = { Graph.player.skipTo(i) }, playing = i == st.index, trailing = {
+                    TrackRow(t, onClick = { Graph.player.skipTo(i) }, playing = i == st.index, onLongPress = { if (!handleDown && dragging < 0) com.ravi.musicspot.ui.openSongMenu(t) }, trailing = {
                         if (i != st.index) IconButton(onClick = { Graph.player.remove(i) }) { Icon(Icons.Rounded.Close, "Remove ${t.title} from queue") }
-                        Icon(Icons.Rounded.DragHandle, "Reorder ${t.title}", Modifier.size(48.dp).padding(12.dp).pointerInput(i, st.queue.size) {
+                        Icon(Icons.Rounded.DragHandle, "Reorder ${t.title}", Modifier.size(48.dp).padding(12.dp).pointerInput(Unit) {
+                            awaitEachGesture { awaitFirstDown(requireUnconsumed = false); handleDown = true; waitForUpOrCancellation(); handleDown = false }
+                        }.pointerInput(i, st.queue.size) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { dragging = i; dragOffset = 0f; haptics.confirm() },
                                 onDragEnd = {
@@ -236,7 +243,7 @@ private fun SyncedLyrics(l: Lyrics.Synced, posMs: Long, romanize: Boolean) {
                 val still = com.ravi.musicspot.ui.motion.reducedMotion()
                 val scale by androidx.compose.animation.core.animateFloatAsState(if (isActive || still) 1f else 0.94f,
                     androidx.compose.animation.core.spring(dampingRatio = 0.9f, stiffness = 56f), label = "ls")
-                Column(Modifier.fillMaxWidth().scroll3d(list, i, focus = 0.5f, maxTilt = 30f, minScale = 0.9f, minAlpha = 0.35f).graphicsLayer { scaleX = scale; scaleY = scale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) }.clickable(onClickLabel = "Seek to this line") { Graph.player.seek((line.startMs - Graph.settings.value.lyricsOffsetMs).coerceAtLeast(0)) }.padding(vertical = 8.dp)) {
+                Column(Modifier.fillMaxWidth().scroll3d(list, i, focus = 0.5f, maxTilt = 30f, minScale = 0.9f, minAlpha = 0.35f, allowOnLite = true).graphicsLayer { scaleX = scale; scaleY = scale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) }.clickable(onClickLabel = "Seek to this line") { Graph.player.seek((line.startMs - Graph.settings.value.lyricsOffsetMs).coerceAtLeast(0)) }.padding(vertical = 8.dp)) {
                     if (isActive && line.wordSynced) {
                         Text(buildAnnotatedString {
                             line.words.forEach { w -> withStyle(SpanStyle(color = if (w.startMs <= posMs) MaterialTheme.colorScheme.primary else color)) { append(w.text) } }

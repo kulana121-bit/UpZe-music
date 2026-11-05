@@ -43,6 +43,9 @@ object SeedArtists {
 
     fun load() { store().read()?.let { _state.value = it.distinctBy { a -> a.id } } }
 
+    /** 1.0.1: last successful [suggested] result, kept for the session (memory only). */
+    @Volatile var cachedSuggestions: List<SeedArtist> = emptyList()
+
     fun isSelected(id: String) = _state.value.any { it.id == id }
 
     fun toggle(a: SeedArtist) {

@@ -6,6 +6,60 @@ Android `versionCode` always increases, whatever the version name.
 
 ## [Unreleased]
 
+## 1.0.1 — 2026-11-05
+
+`versionCode` 22. Same package and signing key; installs over 1.0.0.
+
+### Fixed
+- **First-run setup skipped the Customize and Artists steps.** `MainActivity` decided between Welcome/app and the setup
+  flow from `Graph.settings.state.value` once the app was ready. A plain `StateFlow.value` read is not observed by
+  Compose, and the collected settings were only read while not ready, so after start-up that screen never recomposed on
+  a settings change: finishing Welcome went straight to the app (setup only appeared on a later cold start, where
+  Finish/Skip then could not leave it), and Settings › Run setup again did nothing. It now collects one combined
+  `(ready, settings)` state. The Welcome flow's last step leads into **Customize** (look, glass, player, dock, home,
+  **Artists**, motion & sound).
+- Settings: **Customize** and **Your artists** (Appearance › Setup, and in the Settings list and its search) now open
+  the screens in-app, above the dock; Back, Close and Done return to Settings.
+- Setup flow audit: Back on the first step from Settings returned nothing (now closes); the keyboard from the artist
+  search stayed up after leaving the step; landscape left the steps ~200 dp under the preview (preview now sits beside
+  the steps on landscape/wide screens); artist suggestions were re-downloaded every time the step was revisited or the
+  picker reopened (cached for the session); a failed artist search left its error and Retry on the suggestions view;
+  artist names were laid out 112 dp wide in 96 dp cells (overlapping neighbours on narrow grids); Welcome hid Back on
+  its last step.
+
+### Changed
+- **Player: Queue and Lyrics open full screen.** Swipe up on the player (or tap Up next / Lyrics) opens a full-screen
+  pane with Queue and Lyrics tabs; swipe left/right to switch (the tab indicator follows the finger), swipe down on the
+  header or past the top of the list, or press Back, to close. Same pane in every player design, portrait and
+  landscape (this also replaces the landscape Queue/Lyrics panes that could show nothing). Horizontal swipes on the
+  artwork still skip.
+- **Classic player layout:** the four-tab bar and the Sleep/Sound chips are gone. Two distinct entry cards at the bottom
+  (Up next with the next song, Lyrics); Related, Credits, Sleep timer, Sound & EQ and Song options are in the top-right
+  ⋮ menu; a small chip shows a running sleep timer; more room around the transport controls.
+- **Container transforms:** pages (list items, cards, settings rows), the Customize/Artists screens, sheets, dialogs, the
+  full-screen Queue/Lyrics pane and the Classic player's Related/Credits panes grow out of the element that was tapped
+  and shrink back into it on close. Lite devices get a short fade instead.
+- **Long-press on any song** (Home in all four designs, Search, playlists, albums, artists, library lists, the queue,
+  song cards) opens the same song-options sheet as its ⋮ button, with a haptic.
+- **Tab lift on every dock:** tapping a tab lifts its icon out of the bar as a round glass bubble on a gooey metaball
+  neck that stretches and snaps, then drops back into its slot (spring, haptic). On the Classic dock (expanded, mini
+  squircle, folded circle), its Search orb, Island, Orb and Split docks, and the tablet side rail (the bubble leaves the
+  rail sideways). The active tab gets a soft accent glow (the bar tints toward it) and, where the tabs have no labels, a
+  small dot. Real backdrop blur on the bubble on Android 12+; frosted fill with a light rim on Android 8–11; lite devices
+  get a short lift without the neck.
+- **3D depth on lists:** a wider flat focus band: the centre ~6-7 rows of playlists, albums and the queue stay full size
+  and flat; only rows beyond that tilt and fade. The synced-lyrics drum is unchanged.
+
+### Performance
+- New "lite effects" tier (`Graph.liteFx`: low-RAM devices, ≤ 96 MB app heap or < ~1.6 GB RAM) turns off list 3D depth,
+  the full-screen artwork blur, sheet/dialog transforms (short fades instead) and caps artwork decodes at 480–544 px;
+  Coil's memory cache is 15% of the heap there (20% elsewhere). Blur stays off below Android 12 as before.
+- `profileinstaller` plus a baseline profile for start-up, Home, lists and the player (R8 stays on for release).
+- Smoothness pass on everything new: the pane drag, pager tab indicator, tab-lift bubble/neck and container transforms
+  read their animated values only in layout/draw (offset/graphicsLayer/draw lambdas), the neck Path and brushes are
+  cached (drawWithCache, rewind per frame, no allocation), gesture deltas no longer launch a coroutine per event, and the
+  queue, playlist, search and artist lists have stable keys plus contentType.
+
 ## 1.0.0 — 2026-11-05
 
 First release under the UpZe name (formerly MusicSpot). Version names restart at 1.0.0; `versionCode` is 21 (MusicSpot

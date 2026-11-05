@@ -304,7 +304,7 @@ private fun AuraHeroCard(t: Track, label: String, all: List<Track>, index: Int, 
     val isCurrent = st.current?.id == t.id
     val blurOk = android.os.Build.VERSION.SDK_INT >= 31
     Box(Modifier.fillMaxSize().softShadow(CARD).clip(CARD).background(lerp(tint, Color.Black, 0.55f))
-        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.98f) { if (isCurrent) Graph.player.toggle() else Graph.player.play(all, index) }) {
+        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.98f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { if (isCurrent) Graph.player.toggle() else Graph.player.play(all, index) }) {
         Artwork(t.artUrl, Modifier.fillMaxSize().then(if (blurOk) Modifier.blur(40.dp) else Modifier).graphicsLayer { alpha = if (blurOk) 0.55f else 0.25f; scaleX = 1.3f; scaleY = 1.3f }, RectangleShape)
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(lerp(tint, Color.Black, 0.65f).copy(alpha = 0.92f), Color.Transparent))))
         Row(Modifier.fillMaxSize().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -413,7 +413,7 @@ private fun AuraTopTen(tracks: List<Track>, d: HomeDims, index: Int) {
     val c = MaterialTheme.colorScheme
     LazyRow(Modifier.staggerIn(index), contentPadding = PaddingValues(horizontal = d.gutter), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         itemsIndexed(tracks, key = { _, t -> "top" + t.id }) { i, t ->
-            Row(Modifier.pressable(onClickLabel = "Play ${t.title}") { Graph.player.play(tracks, i) }, verticalAlignment = Alignment.Bottom) {
+            Row(Modifier.pressable(onClickLabel = "Play ${t.title}", onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }, verticalAlignment = Alignment.Bottom) {
                 Text("${i + 1}", style = MaterialTheme.typography.displayLarge.copy(fontSize = 92.sp, letterSpacing = (-6).sp),
                     fontWeight = FontWeight.Black, color = c.onSurface.copy(alpha = 0.16f), modifier = Modifier.offset(y = 18.dp, x = 10.dp))
                 Column(Modifier.width(art)) {
@@ -437,9 +437,9 @@ private fun AuraRecentRow(tracks: List<Track>, d: HomeDims, index: Int) {
             Column(Modifier.width(w)) {
                 Box {
                     Artwork(t.artUrl, Modifier.size(w).softShadow(CARD).clip(CARD)
-                        .pressable(onClickLabel = "Play ${t.title}") { Graph.player.play(tracks, i) }, CARD, t.title)
+                        .pressable(onClickLabel = "Play ${t.title}", onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }, CARD, t.title)
                     Box(Modifier.align(Alignment.BottomEnd).padding(8.dp).size(34.dp).liquidGlass(CircleShape)
-                        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.88f) { Graph.player.play(tracks, i) }, contentAlignment = Alignment.Center) {
+                        .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.88f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }, contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.PlayArrow, null, Modifier.size(18.dp), tint = c.onSurface)
                     }
                 }

@@ -43,6 +43,9 @@ sealed interface Route {
     data class ShelfAll(val shelf: com.ravi.musicspot.model.Shelf) : Route
     data object GoogleLogin : Route
     data object SpotifyLogin : Route
+    /** 1.0.1: the Customize (design setup) flow and the artist picker, opened from Settings; drawn full screen by AppRoot. */
+    data object Customize : Route
+    data object Artists : Route
 }
 
 /** One back stack per tab, so switching tabs keeps each tab's place (like OpenTune's tabs). */

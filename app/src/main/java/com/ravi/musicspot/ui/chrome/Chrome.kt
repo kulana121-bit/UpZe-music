@@ -272,7 +272,7 @@ private fun SearchOrb(selected: Boolean, frameOf: () -> DockFrame, enabled: Bool
         Icon(
             if (selected) Icons.Rounded.Search else Icons.Outlined.Search, null,
             tint = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f), MaterialTheme.colorScheme.primary, lit),
-            modifier = Modifier.size(26.dp).graphicsLayer { rotationZ = -12f * (1f - lit) * (if (still) 0f else 1f) },
+            modifier = Modifier.size(26.dp).graphicsLayer { rotationZ = -12f * (1f - lit) * (if (still) 0f else 1f) }.liftSource(Tab.SEARCH, false, accent, dotAlpha = { 0f }), // 1.0.1: lifts from the orb too
         )
     }
 }
@@ -338,7 +338,7 @@ private fun DockBody(
     val expandI = remember { MutableInteractionSource() }
     val clear = com.ravi.musicspot.ui.glass.glassIsClear() // v2.0.17
     Box(
-        Modifier.fillMaxSize().then(if (clear) Modifier else Modifier.shadowFollowing(frameOf)).then(
+        Modifier.fillMaxSize().liftBar().then(if (clear) Modifier else Modifier.shadowFollowing(frameOf)).then( // 1.0.1: liftBar
             if (collapsedSingle) shapeMod.clickable(interactionSource = expandI, indication = null, onClickLabel = "Show navigation") { haptics.tick(); onExpand() }
                 .semantics { contentDescription = "Navigation, ${selected.label}" }
             else shapeMod,
@@ -378,6 +378,7 @@ private fun DockBody(
                 frameOf = frameOf,
                 hideWhenFolded = hasMini && !on,
                 onAccent = onAccent,
+                accent = accent,
                 solid = { if (on) solid(frameOf().a) else 0f },
             ) { if (!on) haptics.tick(); onSelect(t) }
         }
@@ -408,6 +409,7 @@ private fun DockItem(
     frameOf: () -> DockFrame,
     hideWhenFolded: Boolean,
     onAccent: Color,
+    accent: Color,
     solid: () -> Float,
     onClick: () -> Unit,
 ) {
@@ -442,9 +444,12 @@ private fun DockItem(
     ) {
         val icon = if (selected) tab.selectedIcon else tab.icon
         Icon(icon, null, tint = fg, modifier = iconMod
-            .graphicsLayer { val b = hop.value; val s = scale * (1f + 0.14f * b); scaleX = s; scaleY = s; translationY = -4.dp.toPx() * b; alpha = 1f - solid() })
+            .graphicsLayer { val b = hop.value; val s = scale * (1f + 0.14f * b); scaleX = s; scaleY = s; translationY = -4.dp.toPx() * b; alpha = 1f - solid() }
+            // 1.0.1: tab lift; the dot shows once labels have faded (mini / folded dock).
+            .liftSource(tab, selected, accent, dotAlpha = { smooth(0.4f, 1f, frameOf().a) * (1f - solid()) }))
         if (selected) Icon(icon, null, tint = onAccent, modifier = iconMod
-            .graphicsLayer { val b = hop.value; val s = scale * (1f + 0.14f * b); scaleX = s; scaleY = s; translationY = -4.dp.toPx() * b; alpha = solid() })
+            .graphicsLayer { val b = hop.value; val s = scale * (1f + 0.14f * b); scaleX = s; scaleY = s; translationY = -4.dp.toPx() * b; alpha = solid() }
+            .liftSource(tab, false, accent, dotAlpha = { 0f }, register = false))
         Text(tab.label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false,
             modifier = Modifier
                 .layout { m, c ->
@@ -462,7 +467,7 @@ fun SideRail(tabs: List<Tab>, selected: Tab, onSelect: (Tab) -> Unit, modifier: 
     val haptics = rememberHaptics()
     Column(
         modifier.windowInsetsPadding(WindowInsets.statusBars).windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(12.dp).width(80.dp).fillMaxHeight().glass(RoundedCornerShape(28.dp)).padding(vertical = 16.dp),
+            .padding(12.dp).width(80.dp).fillMaxHeight().glass(RoundedCornerShape(28.dp)).liftBar(rail = true).padding(vertical = 16.dp), // 1.0.1: bubbles lift out to the right
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text("MS", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 12.dp))
@@ -473,7 +478,8 @@ fun SideRail(tabs: List<Tab>, selected: Tab, onSelect: (Tab) -> Unit, modifier: 
                 Modifier.size(64.dp).clip(RoundedCornerShape(20.dp)).background(bg).clickable { if (!on) haptics.tick(); onSelect(t) }.semantics { role = Role.Tab; this.selected = on },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
             ) {
-                Icon(if (on) t.selectedIcon else t.icon, null, tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(if (on) t.selectedIcon else t.icon, null, tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.liftSource(t, false, MaterialTheme.colorScheme.primary, dotAlpha = { 0f })) // 1.0.1: tab lift
                 Text(t.label, style = MaterialTheme.typography.labelSmall, color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
         }

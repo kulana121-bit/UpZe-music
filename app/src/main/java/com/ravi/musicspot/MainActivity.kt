@@ -11,10 +11,12 @@ import androidx.compose.runtime.collectAsState // v2.0.15
 import androidx.compose.foundation.background // v2.0.16
 import androidx.compose.foundation.layout.fillMaxSize // v2.0.16
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember // 1.0.1
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.ravi.musicspot.core.CrashGuard
 import com.ravi.musicspot.ui.AppRoot
+import com.ravi.musicspot.ui.motion.trackTaps // 1.0.1
 
 class MainActivity : ComponentActivity() {
     private var openPlayer by mutableStateOf(false)
@@ -35,17 +37,20 @@ class MainActivity : ComponentActivity() {
         openPlayer = intent?.getBooleanExtra(EXTRA_OPEN_PLAYER, false) == true
         // v2.0.15: the animated splash is gone (ui/Splash.kt stays, unused); the app opens straight away, no reveal layer.
         setContent {
-            androidx.compose.foundation.layout.Box {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().trackTaps()) { // 1.0.1: tap origin for container transforms
                 // v2.0.15: first-time design setup. Shown after the Welcome flow (which lives inside AppRoot and sets
                 // `onboarded`), only once settings have loaded (Graph.ready), until setupDone is set (Finish or Skip).
-                val settings by Graph.settings.state.collectAsState()
-                val ready by Graph.ready.collectAsState()
-                // v2.0.16: the two collectors can deliver out of order (ready=true while `settings` still holds the
-                // defaults), which flashed Welcome/AppRoot before Setup. Settings load before ready flips, so read the
-                // flow's current value once ready; and draw nothing but the background until then.
-                // 1.0.0: intentional; `settings` above already subscribes this scope, so the read is never stale.
-                @android.annotation.SuppressLint("StateFlowValueCalledInComposition")
-                val s = if (ready) Graph.settings.state.value else settings
+                // 1.0.1: one combined, reactive (ready, settings) state. Up to 1.0.0 this read
+                // `Graph.settings.state.value` once ready: a plain StateFlow read is not observed by Compose, and the
+                // collected `settings` was only read while !ready, so after start-up this scope never recomposed on a
+                // settings change. Finishing Welcome (onboarded = true) therefore never swapped in the setup flow
+                // (Customize + Artists steps were skipped), Settings › Run setup again did nothing, and Finish/Skip in
+                // a setup shown at launch could not leave it. combine() keeps the v2.0.16 guarantee (no defaults
+                // flash): settings load before `ready` flips, so the first ready=true pair carries loaded settings.
+                val gate by remember {
+                    kotlinx.coroutines.flow.combine(Graph.ready, Graph.settings.state) { r, st -> r to st }
+                }.collectAsState(initial = Graph.ready.value to Graph.settings.state.value)
+                val (ready, s) = gate
                 if (!ready) {
                     com.ravi.musicspot.ui.theme.MusicSpotTheme(artUrl = null, dynamic = s.dynamicColor, mode = s.themeMode) {
                         androidx.compose.foundation.layout.Box(

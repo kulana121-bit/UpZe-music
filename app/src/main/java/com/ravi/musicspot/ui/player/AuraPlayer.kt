@@ -134,6 +134,9 @@ fun AuraPlayerScreen(
     val st by Graph.player.state.collectAsState()
     val t = st.current ?: return
     var pane by rememberSaveable { mutableStateOf<Pane?>(null) }
+    // 1.0.1: last full-screen page (Queue/Lyrics), reopened by a swipe up.
+    var lastFull by rememberSaveable { mutableStateOf(Pane.QUEUE) }
+    androidx.compose.runtime.LaunchedEffect(pane) { pane?.let { if (it.isFull()) lastFull = it } }
     var sleepSheet by remember { mutableStateOf(false) }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val still = reducedMotion()
@@ -155,26 +158,21 @@ fun AuraPlayerScreen(
         overlay = {
             Column(
                 Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
-                    .pointerInput(pane) {
-                        if (pane == null) {
-                            var total = 0f
-                            detectVerticalDragGestures(onDragStart = { total = 0f }, onDragEnd = { onDragEnd(total) }, onDragCancel = { onDragEnd(0f) }) { _, dy -> total += dy; onDrag(dy) }
-                        }
-                    },
+                    .playerVerticalGestures(enabled = pane == null, onDrag = onDrag, onDragEnd = onDragEnd, onSwipeUp = { pane = lastFull }), // 1.0.1: swipe up = full-screen pane
             ) {
                 AuraTopBar(onCollapse, onMore = { Menus.track = t })
                 if (landscape) {
                     Row(Modifier.weight(1f).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                         AuraCover(t.artUrl, coverVisible && !canvasOn, onCoverBounds, Modifier.fillMaxHeight().weight(1f), reflection = false)
                         Spacer(Modifier.width(20.dp))
-                        AnimatedContent(pane, transitionSpec = { MotionSpec.fadeThrough(still) }, label = "auraLand", modifier = Modifier.weight(1.2f).fillMaxHeight()) { p ->
+                        AnimatedContent(pane.inPlayer(), transitionSpec = { MotionSpec.fadeThrough(still) }, label = "auraLand", modifier = Modifier.weight(1.2f).fillMaxHeight()) { p ->
                             if (p == null) Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
                                 AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = onOpenEq, onPane = { pane = it }, openPane = pane)
                             } else AuraPaneCard(p, t, onCollapse, onNavigate)
                         }
                     }
                 } else {
-                    AnimatedContent(pane, transitionSpec = {
+                    AnimatedContent(pane.inPlayer(), transitionSpec = {
                         when {
                             initialState == null && targetState != null -> MotionSpec.containerRise(open = true, still = still)
                             initialState != null && targetState == null -> MotionSpec.containerRise(open = false, still = still)
@@ -199,6 +197,8 @@ fun AuraPlayerScreen(
             }
         },
     )
+    // 1.0.1: Queue / Lyrics open full screen over the player (pager + tabs, swipe down or Back to close).
+    FullScreenPane(pane, onSelect = { pane = it }, onClose = { pane = null })
     SleepSheet(sleepSheet) { sleepSheet = false }
 }
 
@@ -217,7 +217,7 @@ private fun AuraBackground(url: String?) {
     // v2.0.14: unconditional loop (was rememberInfiniteTransition inside an if); 0..1 linear restart over 40s.
     val auraLoop by com.ravi.musicspot.ui.motion.rememberLoopPhase(running = !still, periodMs = 40_000, reverse = false)
     val phase = if (still) 0.25f else auraLoop
-    val blurOk = android.os.Build.VERSION.SDK_INT >= 31
+    val blurOk = android.os.Build.VERSION.SDK_INT >= 31 && !com.ravi.musicspot.Graph.liteFx // 1.0.1
     Box(Modifier.fillMaxSize().background(c.background))
     Artwork(url, Modifier.fillMaxSize().then(if (blurOk) Modifier.blur(72.dp) else Modifier)
         .graphicsLayer { alpha = if (blurOk) 0.38f else 0.12f; scaleX = 1.35f; scaleY = 1.35f }, RectangleShape)

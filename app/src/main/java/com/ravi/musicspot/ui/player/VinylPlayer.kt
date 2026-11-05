@@ -142,6 +142,9 @@ fun VinylPlayerScreen(
     val st by Graph.player.state.collectAsState()
     val t = st.current ?: return
     var pane by rememberSaveable { mutableStateOf<Pane?>(null) }
+    // 1.0.1: last full-screen page (Queue/Lyrics), reopened by a swipe up.
+    var lastFull by rememberSaveable { mutableStateOf(Pane.QUEUE) }
+    androidx.compose.runtime.LaunchedEffect(pane) { pane?.let { if (it.isFull()) lastFull = it } }
     var sleepSheet by remember { mutableStateOf(false) }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val still = reducedMotion()
@@ -161,26 +164,21 @@ fun VinylPlayerScreen(
                 .background(Brush.verticalGradient(0f to lerp(scheme.background, tint, 0.55f), 0.45f to lerp(scheme.background, tint, 0.18f), 0.8f to scheme.background))) {
                 Column(
                     Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
-                        .pointerInput(pane) {
-                            if (pane == null) {
-                                var total = 0f
-                                detectVerticalDragGestures(onDragStart = { total = 0f }, onDragEnd = { onDragEnd(total) }, onDragCancel = { onDragEnd(0f) }) { _, dy -> total += dy; onDrag(dy) }
-                            }
-                        },
+                        .playerVerticalGestures(enabled = pane == null, onDrag = onDrag, onDragEnd = onDragEnd, onSwipeUp = { pane = lastFull }), // 1.0.1: swipe up = full-screen pane
                 ) {
                     DeckTopBar(onCollapse, onMore = { Menus.track = t })
                     if (landscape) {
                         Row(Modifier.weight(1f).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                             DeckCassette(t, coverVisible, onCoverBounds, Modifier.fillMaxHeight().weight(1.1f))
                             Spacer(Modifier.width(20.dp))
-                            AnimatedContent(pane, transitionSpec = { MotionSpec.fadeThrough(still) }, label = "deckLand", modifier = Modifier.weight(1f).fillMaxHeight()) { p ->
+                            AnimatedContent(pane.inPlayer(), transitionSpec = { MotionSpec.fadeThrough(still) }, label = "deckLand", modifier = Modifier.weight(1f).fillMaxHeight()) { p ->
                                 if (p == null) Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
                                     DeckControls(t, onCollapse, onNavigate)
                                 } else DeckPaneCard(p, t, onCollapse, onNavigate, Modifier.fillMaxSize())
                             }
                         }
                     } else {
-                        AnimatedContent(pane, transitionSpec = {
+                        AnimatedContent(pane.inPlayer(), transitionSpec = {
                             when {
                                 initialState == null && targetState != null -> MotionSpec.containerRise(open = true, still = still)
                                 initialState != null && targetState == null -> MotionSpec.containerRise(open = false, still = still)
@@ -200,6 +198,8 @@ fun VinylPlayerScreen(
                     DeckPaneRow(pane, onSelect = { pane = if (pane == it) null else it }, onOpenSleep = { sleepSheet = true }, onOpenEq = onOpenEq)
                 }
             }
+            // 1.0.1: Queue / Lyrics open full screen over the player (pager + tabs, swipe down or Back to close).
+            FullScreenPane(pane, onSelect = { pane = it }, onClose = { pane = null })
             SleepSheet(sleepSheet) { sleepSheet = false }
         }
     }

@@ -228,7 +228,7 @@ fun SearchScreen() {
                     item { SectionHeader("Songs") }
                     // v2.0.14: distinct ids; play by position, not indexOf.
                     val songs = r.tracks.distinctBy { it.id }
-                    itemsIndexed(songs, key = { _, it -> it.id }) { i, t -> Box(Modifier.staggerIn(i + 1)) { TrackRow(t, onClick = { Graph.player.play(songs, i) }, onMore = { Menus.track = t }) } }
+                    itemsIndexed(songs, key = { _, it -> it.id }, contentType = { _, _ -> "track" }) { i, t -> Box(Modifier.staggerIn(i + 1)) { TrackRow(t, onClick = { Graph.player.play(songs, i) }, onMore = { Menus.track = t }) } }
                 }
             }
         }

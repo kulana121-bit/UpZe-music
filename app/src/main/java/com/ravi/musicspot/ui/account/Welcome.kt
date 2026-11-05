@@ -123,7 +123,8 @@ fun WelcomeFlow() {
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (step > 0 && step < STEPS - 1) OutlinedButton(onClick = { go(step - 1) }) { Text("Back") }
+                // 1.0.1: Back is offered on the last step too (the system Back already went there).
+                if (step > 0) OutlinedButton(onClick = { go(step - 1) }) { Text("Back") }
                 Spacer(Modifier.weight(1f))
                 when (step) {
                     0 -> Button(onClick = { go(1) }) { Text("Get started") }
@@ -132,7 +133,9 @@ fun WelcomeFlow() {
                         if (yt.any { it.service == Account.Service.YOUTUBE }) Button(onClick = { go(2) }) { Text("Continue") }
                         else OutlinedButton(onClick = { go(2) }) { Text("Skip / use without account") }
                     }
-                    STEPS - 1 -> Button(onClick = { finish() }) { Text("Start listening") }
+                    // 1.0.1: the Welcome flow hands over to the Customize flow (look, glass, player, dock, home, artists,
+                    // motion), which MainActivity shows once `onboarded` is set; it has its own Skip.
+                    STEPS - 1 -> Button(onClick = { finish() }) { Text("Customize") }
                     else -> Button(onClick = { go(step + 1) }) { Text("Next") }
                 }
             }
@@ -275,6 +278,9 @@ private fun ColumnScope.DoneStep() {
         Bullet(Icons.Rounded.GraphicEq, "Quality", s.quality.label)
     }
     Spacer(Modifier.height(12.dp))
-    Text("Tip: swipe up on the mini player for Now Playing.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Start,
+    Text("Next: customize the look and pick artists you love. Every step is optional.", style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface)
+    Spacer(Modifier.height(8.dp))
+    Text("Tip: swipe up on the mini player for Now Playing, and up again for the queue and lyrics.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Start,
         color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

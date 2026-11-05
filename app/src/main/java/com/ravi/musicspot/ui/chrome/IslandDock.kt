@@ -148,7 +148,7 @@ private fun IslandTabs(tabs: List<Tab>, selected: Tab, onSelect: (Tab) -> Unit, 
         animateFloatAsState(if (t == selected) 2.2f else 1f, if (still) snap() else spring(dampingRatio = 0.78f, stiffness = 150f), label = "islandW").value
     }
     val primary = MaterialTheme.colorScheme.primary
-    Row(Modifier.fillMaxWidth().height(TAB_ROW).padding(horizontal = 8.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(TAB_ROW).liftBar().padding(horizontal = 8.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) { // 1.0.1: liftBar
         tabs.forEachIndexed { i, t ->
             val on = i == sel
             val interaction = remember { MutableInteractionSource() }
@@ -164,7 +164,7 @@ private fun IslandTabs(tabs: List<Tab>, selected: Tab, onSelect: (Tab) -> Unit, 
                     .background(Brush.verticalGradient(listOf(primary.copy(alpha = 0.30f), primary.copy(alpha = 0.14f)))))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                     AnimatedContent(on, transitionSpec = { com.ravi.musicspot.ui.motion.iconSwap(still) }, label = "islandIcon") { o ->
-                        Icon(if (o) t.selectedIcon else t.icon, t.label, Modifier.size(24.dp), tint = fg)
+                        Icon(if (o) t.selectedIcon else t.icon, t.label, Modifier.size(24.dp).liftSource(t, o, primary, register = o == on), tint = fg) // 1.0.1: tab lift + dot
                     }
                     if (on) {
                         Spacer(Modifier.width(6.dp))

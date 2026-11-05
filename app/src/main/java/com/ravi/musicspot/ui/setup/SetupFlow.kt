@@ -14,6 +14,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
@@ -65,6 +67,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -125,38 +129,56 @@ private val ArtGradient = Brush.linearGradient(listOf(ArtPink, ArtViolet, ArtTea
 
 private fun finishSetup() = Graph.settings.update { it.copy(setupDone = true) } // v2.0.15
 
-/** v2.0.15: full-screen first-time setup. Every choice is applied live through Graph.settings. */
+// 1.0.1: step names shown under the "Customize" title.
+private val STEP_NAMES = listOf("Look", "Glass", "Player", "Dock", "Home", "Artists", "Motion & sound")
+
+/**
+ * v2.0.15: full-screen first-time setup. Every choice is applied live through Graph.settings.
+ * 1.0.1: titled "Customize" with a step label; also opened from Settings (Appearance › Customize) with
+ * [fromSettings] = true, where Back on the first step, Close and Done return through [onExit] instead of
+ * leaving the app. Landscape / wide screens put the live preview beside the steps instead of above them.
+ */
 @Composable
-fun SetupFlow() {
+fun SetupFlow(fromSettings: Boolean = false, onExit: () -> Unit = {}) {
     val s by Graph.settings.state.collectAsState()
     val still = reducedMotion()
     val pager = rememberPagerState(pageCount = { SETUP_STEPS })
     val scope = rememberCoroutineScope()
+    val focus = LocalFocusManager.current
     val page = pager.currentPage
     fun go(to: Int) {
         val t = to.coerceIn(0, SETUP_STEPS - 1)
         scope.launch { if (still) pager.scrollToPage(t) else pager.animateScrollToPage(t) }
     }
-    BackHandler(enabled = page > 0) { go(page - 1) }
+    fun done() { finishSetup(); onExit() }
+    // 1.0.1: leaving the Artists step (by button or swipe) hides the keyboard its search field opened.
+    LaunchedEffect(pager.settledPage) { if (pager.settledPage != S_ARTISTS) focus.clearFocus() }
+    // 1.0.1: from Settings, Back on the first step returns to Settings (first run: Back on step 1 leaves the app as before).
+    BackHandler(enabled = page > 0 || fromSettings) { if (page > 0) go(page - 1) else onExit() }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
+        // 1.0.1: side-by-side on landscape tablets/phones, where a preview above the steps left them ~200 dp.
+        val twoPane = maxWidth > maxHeight && maxWidth >= 560.dp
         val previewH = maxHeight * 0.42f
-        Column(Modifier.fillMaxSize()) {
+        val previewW = (maxHeight * 0.5f).coerceAtMost(maxWidth * 0.4f)
+        val header: @Composable () -> Unit = {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                StepDots(page, still)
-                Spacer(Modifier.weight(1f))
-                if (page < SETUP_STEPS - 1) TextButton(onClick = { finishSetup() }) { Text("Skip setup") }
-            }
-            AnimatedVisibility(
-                visible = page != S_ARTISTS,
-                enter = if (still) EnterTransition.None else expandVertically() + fadeIn(),
-                exit = if (still) ExitTransition.None else shrinkVertically() + fadeOut(),
-            ) {
-                Box(Modifier.fillMaxWidth().height(previewH).padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
-                    PhonePreview(s, playerStep = page == S_PLAYER, still = still, modifier = Modifier.fillMaxHeight().aspectRatio(0.5f))
+                Column(Modifier.weight(1f)) {
+                    Text("Customize", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StepDots(page, still)
+                        Spacer(Modifier.width(10.dp))
+                        Text("${page + 1}/$SETUP_STEPS · ${STEP_NAMES[page]}", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
                 }
+                if (fromSettings) TextButton(onClick = onExit) { Text("Close") }
+                else if (page < SETUP_STEPS - 1) TextButton(onClick = { done() }) { Text("Skip setup") }
             }
-            HorizontalPager(state = pager, modifier = Modifier.weight(1f).fillMaxWidth()) { p ->
+        }
+        val steps: @Composable (Modifier) -> Unit = { m ->
+            HorizontalPager(state = pager, modifier = m) { p ->
                 if (p == S_ARTISTS) {
                     ArtistPickerStep(Modifier.fillMaxSize())
                 } else {
@@ -175,12 +197,50 @@ fun SetupFlow() {
                     }
                 }
             }
+        }
+        val buttons: @Composable () -> Unit = {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (page > 0) OutlinedButton(onClick = { go(page - 1) }) { Text("Back") }
                 Spacer(Modifier.weight(1f))
                 if (page == S_ARTISTS) TextButton(onClick = { go(page + 1) }) { Text("Skip") }
-                if (page == SETUP_STEPS - 1) Button(onClick = { finishSetup() }) { Text("Start listening") }
+                if (page == SETUP_STEPS - 1) Button(onClick = { done() }) { Text(if (fromSettings) "Done" else "Start listening") }
                 else Button(onClick = { go(page + 1) }) { Text("Next") }
+            }
+        }
+        val preview: @Composable (Modifier) -> Unit = { m ->
+            Box(m, contentAlignment = Alignment.Center) {
+                PhonePreview(s, playerStep = page == S_PLAYER, still = still, modifier = Modifier.fillMaxHeight().aspectRatio(0.5f))
+            }
+        }
+        if (twoPane) {
+            Column(Modifier.fillMaxSize()) {
+                header()
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    AnimatedVisibility(
+                        visible = page != S_ARTISTS,
+                        enter = if (still) EnterTransition.None else expandHorizontally() + fadeIn(),
+                        exit = if (still) ExitTransition.None else shrinkHorizontally() + fadeOut(),
+                    ) {
+                        preview(Modifier.fillMaxHeight().width(previewW).padding(vertical = 8.dp, horizontal = 12.dp))
+                    }
+                    Column(Modifier.weight(1f).fillMaxHeight()) {
+                        steps(Modifier.weight(1f).fillMaxWidth())
+                        buttons()
+                    }
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                header()
+                AnimatedVisibility(
+                    visible = page != S_ARTISTS,
+                    enter = if (still) EnterTransition.None else expandVertically() + fadeIn(),
+                    exit = if (still) ExitTransition.None else shrinkVertically() + fadeOut(),
+                ) {
+                    preview(Modifier.fillMaxWidth().height(previewH).padding(vertical = 4.dp))
+                }
+                steps(Modifier.weight(1f).fillMaxWidth())
+                buttons()
             }
         }
     }

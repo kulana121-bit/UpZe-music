@@ -130,9 +130,9 @@ fun TrackListPage(
             }
             if (loading) item { Loading() }
             else if (tracks.isEmpty()) item { EmptyState(emptyIcon, emptyTitle, emptyBody) }
-            items(tracks.size, key = { "${tracks[it].id}-$it" }) { i ->
+            items(tracks.size, key = { "${tracks[it].id}-$it" }, contentType = { "track" }) { i -> // 1.0.1: contentType
                 val t = tracks[i]
-                androidx.compose.foundation.layout.Box(Modifier.scroll3d(list3d, i + 1, focus = 0.5f, maxTilt = 24f, minScale = 0.9f, minAlpha = 0.55f, flat = 0.45f).staggerIn(i, enabled = i < 14)) { TrackRow(t, onClick = { Graph.player.play(tracks, i) }, onMore = { Menus.track = t }, trailing = rowTrailing?.let { { it(i, t) } }) }
+                androidx.compose.foundation.layout.Box(Modifier.scroll3d(list3d, i + 1, focus = 0.5f, maxTilt = 24f, minScale = 0.9f, minAlpha = 0.55f, flat = 0.45f, flatRows = com.ravi.musicspot.ui.motion.Depth.FLAT_TRACKS).staggerIn(i, enabled = i < 14)) { TrackRow(t, onClick = { Graph.player.play(tracks, i) }, onMore = { Menus.track = t }, trailing = rowTrailing?.let { { it(i, t) } }) }
             }
             extra?.invoke(this)
         }
@@ -212,7 +212,7 @@ fun ArtistScreen(r: Route.Artist) {
                     val top = a.topTracks.distinctBy { it.id }
                     if (top.isNotEmpty()) {
                         item { SectionHeader("Top songs") }
-                        itemsIndexed(top.take(10), key = { _, it -> it.id }) { i, t -> Box(Modifier.staggerIn(i + 1)) { TrackRow(t, onClick = { Graph.player.play(top, i) }, onMore = { Menus.track = t }) } }
+                        itemsIndexed(top.take(10), key = { _, it -> it.id }, contentType = { _, _ -> "track" }) { i, t -> Box(Modifier.staggerIn(i + 1)) { TrackRow(t, onClick = { Graph.player.play(top, i) }, onMore = { Menus.track = t }) } }
                     }
                     a.shelves.forEachIndexed { i, sh ->
                         item(key = "s$i") { SectionHeader(sh.title) }

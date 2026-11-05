@@ -283,10 +283,19 @@ fun AppearancePage() {
             }
         }
         // v2.0.15: reopen the first-time design setup (theme, glass, player, dock, home, motion, audio).
+        // 1.0.1: these rows used to flip `setupDone` off and rely on MainActivity swapping the whole UI, which never
+        // recomposed (see MainActivity), so nothing opened. They now open the screens in-app, above the dock, and
+        // Back / Close / Done return here.
         item {
+            val nav = LocalNav.current
+            val seeds by com.ravi.musicspot.data.SeedArtists.state.collectAsState()
             Group("Setup") {
-                NavRow(Icons.Rounded.AutoAwesome, "Run setup again", "Walk through theme, glass, player, dock and home designs with a live preview") {
-                    Graph.settings.update { it.copy(setupDone = false) }
+                NavRow(Icons.Rounded.AutoAwesome, "Customize", "Walk through theme, glass, player, dock, home, artists and motion with a live preview") {
+                    nav.push(com.ravi.musicspot.ui.Route.Customize)
+                }
+                RowDivider()
+                NavRow(Icons.Rounded.Person, "Your artists", if (seeds.isEmpty()) "Pick artists to tune Home's “For you”" else "${seeds.size} picked · ${seeds.take(3).joinToString { it.name }}") {
+                    nav.push(com.ravi.musicspot.ui.Route.Artists)
                 }
             }
         }
