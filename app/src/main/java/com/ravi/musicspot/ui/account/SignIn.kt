@@ -367,7 +367,7 @@ private fun SpotifyLoginScreenInline(onDone: (Boolean) -> Unit) {
                     onClick = { blank = true },
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = SpotifyGreen, contentColor = Color.Black),
                     modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
-                ) { Text("Login option nahi dikh raha? Tap karo", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Can't see the login option? Tap here", fontWeight = FontWeight.SemiBold) }
                 if (blank && !saving) SpotifyFallback(
                     value = manual, onValue = { manual = it },
                     webInfo = buildString {
