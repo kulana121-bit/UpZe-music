@@ -23,6 +23,25 @@ JioSaavn and other free catalogues, from the music on your phone and from your o
 server, imports your Spotify and YouTube Music libraries, and gives you an EQ, AutoEq headphone profiles and an honest
 upscaler. No ads, no telemetry, no account required.
 
+## Preview
+
+<div align="center">
+
+| Home | Explore | Library |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/preview-home.jpg" width="250" alt="UpZe — Home screen" /> | <img src="docs/screenshots/preview-explore.jpg" width="250" alt="UpZe — Explore screen" /> | <img src="docs/screenshots/preview-library.jpg" width="250" alt="UpZe — Library screen" /> |
+
+| Now Playing | Lyrics | Playlist |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/preview-now-playing.jpg" width="250" alt="UpZe — Now Playing screen" /> | <img src="docs/screenshots/preview-lyrics.jpg" width="250" alt="UpZe — Synced lyrics screen" /> | <img src="docs/screenshots/preview-playlist.jpg" width="250" alt="UpZe — Playlist screen" /> |
+
+</div>
+
+> **Preview disclaimer:** The screenshots above are app-preview samples shared only to showcase UpZe's interface
+> and features. The songs, artist names, album artwork and other content visible in them are shown for
+> demonstration purposes only, belong to their respective owners, and are **not** distributed with this app or
+> this repository — UpZe hosts no music (see [Disclaimer](#disclaimer) below).
+
 ## Features
 
 ### Playback sources
