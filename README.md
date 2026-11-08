@@ -4,13 +4,14 @@
 
 # UpZe
 
-**A free, open-source music player for Android that streams legal catalogues, plays your own files and servers, and runs every song through a real sound engine.**
+**A free, open-source music player for Android and iOS that streams legal catalogues, plays your own files and servers, and runs every song through a real sound engine.**
 
 [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B%20(minSdk%2026)-3DDC84?logo=android&logoColor=white)](#download--install)
+[![iOS 15+](https://img.shields.io/badge/iOS-15%2B-000000?logo=apple&logoColor=white)](#ios-iphone--ipad)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
-[![Latest release](https://img.shields.io/badge/release-v1.0.1-FF5358)](https://github.com/kulana121-bit/UpZe-music/releases)
+[![Latest release](https://img.shields.io/badge/release-v1.02-FF5358)](https://github.com/kulana121-bit/UpZe-music/releases)
 
 [Download](https://github.com/kulana121-bit/UpZe-music/releases) · [Features](#features) · [Build](#build-from-source) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
@@ -22,6 +23,11 @@ UpZe (formerly MusicSpot) is written in Kotlin with Jetpack Compose and AndroidX
 JioSaavn and other free catalogues, from the music on your phone and from your own Subsonic/Navidrome or Jellyfin
 server, imports your Spotify and YouTube Music libraries, and gives you an EQ, AutoEq headphone profiles and an honest
 upscaler. No ads, no telemetry, no account required.
+
+The same project also ships on **iOS**: the Kotlin Multiplatform + Compose Multiplatform port lives in
+[UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP), and the v1.02 release carries both the Android APK and the
+iOS IPA (see [iOS install](#ios-iphone--ipad)). Both platforms share one identity — package/bundle ID
+`com.ravi.musicspot` — so updates always install in place and keep your data.
 
 ## Preview
 
@@ -49,6 +55,10 @@ upscaler. No ads, no telemetry, no account required.
 |---|---|
 | YouTube Music (Innertube, NewPipe Extractor fallback) | Full catalogue, Opus ~160 kbps; 256 kbps with a signed-in Premium account |
 | JioSaavn | Catalogue, 320 kbps AAC where available; automatic fallback when YouTube refuses a stream |
+| Monochrome (Tidal HiFi) | True lossless FLAC (16-bit/44.1 kHz); a stream is only labelled lossless after its FLAC header checks out |
+| Qobuz (lossless proxy) | Lossless FLAC through community proxy endpoints |
+| NetEase Cloud Music | Large Chinese and international catalogue |
+| Live radio | Thousands of stations via Radio Browser; live only — never cached or downloaded |
 | Audius · Jamendo · Internet Archive | Official APIs; FLAC where offered (Jamendo needs your free client_id) |
 | SoundCloud | Via NewPipe Extractor (off by default; currently broken upstream) |
 | On this device | FLAC/ALAC/WAV/hi-res files through MediaStore |
@@ -69,7 +79,9 @@ downloads (WorkManager, Wi-Fi-only option) and an offline mode.
 - Pure hi-res output, and bit-perfect USB DAC mode on Android 14+.
 
 ### Lyrics
-- Provider chain in your order: LRCLIB, LyricsPlus (word-by-word), KuGou, NetEase, YouTube Music.
+- Word-by-word first: Musixmatch (RichSync), LyricsPlus, KuGou (KRC), QQ Music (QRC) and NetEase (YRC) provide
+  word-timed lyrics; then line-synced LRCLIB and AMLL (TTML), with JioSaavn, Lyrics.ovh and YouTube Music as
+  fallbacks. Providers are asked in your order and the best sync available wins.
 - Synced and enhanced LRC, instrumental-break dots, romanisation, ±3 s offset, disk cache.
 
 ### UI, dock & motion
@@ -87,6 +99,8 @@ downloads (WorkManager, Wi-Fi-only option) and an offline mode.
   an Android Keystore key and excluded from backups. Everything works as a guest.
 - Built-in updater: checks GitHub Releases (at most every 12 h, or from Settings › About › Check for updates), shows
   the release notes, downloads the APK and hands it to the system installer.
+- On iOS, updates arrive through the AltStore/SideStore source (see [iOS install](#ios-iphone--ipad)) and install in
+  place under the same bundle ID.
 
 ## Download & install
 
@@ -185,14 +199,20 @@ app/src/test/                 Unit tests (routing, DSP, lyrics, logic, updater, 
 
 The Kotlin package stays `com.ravi.musicspot` so existing installs upgrade in place.
 
+The cross-platform version of this same project lives in [UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP): one
+`composeApp` module with `commonMain` (shared UI, sources, lyrics and sound-engine logic), `androidMain` and `iosMain`
+platform layers, plus a thin SwiftUI host app for iOS.
+
 ## Tech stack
 
-Kotlin 2.4 · Jetpack Compose & Material 3 · AndroidX Media3 (ExoPlayer, MediaSession) · Kotlin coroutines & Flow ·
+Kotlin 2.4 · Jetpack Compose & Material 3 · Kotlin Multiplatform & Compose Multiplatform for the iOS build
+([UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP)) · AndroidX Media3 (ExoPlayer, MediaSession) · Kotlin coroutines & Flow ·
 kotlinx.serialization · OkHttp · Coil 3 · WorkManager · NewPipe Extractor · Kyant Backdrop & Haze · Gradle 9.5 with
 AGP 9.3 · JUnit 4 & Robolectric.
 
 ## Roadmap
 
+- [x] iOS app — Kotlin Multiplatform build, distributed as a sideload IPA with an AltStore/SideStore source
 - [ ] Play Store–independent F-Droid build
 - [ ] Android Auto browsing
 - [ ] More widget sizes and a lock-screen lyrics view
@@ -228,7 +248,9 @@ projects (OpenTune, NewPipe Extractor), so derivatives must stay GPL-3.0 as well
 
 UpZe hosts no music. It plays streams from services you choose to enable, your own files and your own servers. It does
 **not** stream audio from Spotify (Spotify is used for library metadata only), does not use rip proxies or torrents,
-and does not bypass DRM. Respect the terms of service of every service you use and the copyright of the music you play.
+and does not bypass DRM or use torrents. The optional Monochrome and Qobuz sources fetch lossless streams through
+community endpoints; enable only the sources you are comfortable using. Respect the terms of service of every
+service you use and the copyright of the music you play.
 UpZe is not affiliated with YouTube, Google, JioSaavn, Spotify or any other service it can connect to.
 
 ## Developer
