@@ -99,6 +99,36 @@ Requirements: Android 8.0 (API 26) or newer (one APK for arm64-v8a, armeabi-v7a,
 > Coming from MusicSpot? UpZe keeps the package name `com.ravi.musicspot` and the same signing key, so it installs
 > over MusicSpot 2.0.x and keeps your library, settings and sign-ins.
 
+### iOS (iPhone & iPad)
+
+UpZe also runs on iOS 15 or newer, built from the shared Kotlin Multiplatform codebase in
+[UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP). The iOS build is an **unsigned IPA**, so it is installed with a
+sideloading tool instead of the App Store.
+
+**Option 1 — AltStore or SideStore (recommended, updates included)**
+
+1. Install [AltStore](https://altstore.io) or [SideStore](https://sidestore.io) on your iPhone/iPad and finish its setup.
+2. In AltStore/SideStore open **Sources** and add this source:
+   `https://raw.githubusercontent.com/kulana121-bit/UpZe-KMP/main/apps.json`
+3. Install **UpZe** from that source. New versions appear inside AltStore/SideStore and update in place — your
+   library and settings are kept.
+
+**Option 2 — Sideloadly (one-time install from a computer)**
+
+1. Download `UpZe-vX.Y.Z.ipa` from the [latest release](https://github.com/kulana121-bit/UpZe-music/releases).
+2. Install Sideloadly on your computer, connect your iPhone/iPad, sign in with your Apple ID, drag in the IPA and
+   press **Start**.
+
+Good to know:
+
+- UpZe uses the same identity on iOS as on Android — bundle ID `com.ravi.musicspot` — and it never changes, so every
+  iOS update installs over the previous version without losing data. Always sign/install updates with the same
+  Apple ID and the same tool you used the first time.
+- With a free Apple ID, sideloaded apps expire after 7 days; AltStore/SideStore refresh them automatically in the
+  background. A paid Apple Developer account extends this to one year.
+- The IPA is unsigned by design: your sideloading tool signs it with your own Apple ID during install. Only download
+  the IPA from this repository's releases — never from unofficial mirrors.
+
 ## Build from source
 
 Requirements: JDK 17+, Android SDK with platform 37 and build-tools 36.0.0, and network access to Google Maven, Maven
