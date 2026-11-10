@@ -11,7 +11,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
-[![Latest release](https://img.shields.io/badge/release-v1.02-FF5358)](https://github.com/kulana121-bit/UpZe-music/releases)
+[![Latest release](https://img.shields.io/badge/release-v1.03-FF5358)](https://github.com/kulana121-bit/UpZe-music/releases)
 
 [Download](https://github.com/kulana121-bit/UpZe-music/releases) · [Features](#features) · [Build](#build-from-source) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
@@ -25,8 +25,7 @@ server, imports your Spotify and YouTube Music libraries, and gives you an EQ, A
 upscaler. No ads, no telemetry, no account required.
 
 The same project also ships on **iOS**: the Kotlin Multiplatform + Compose Multiplatform port lives in
-[UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP), and the v1.02 release carries both the Android APK and the
-iOS IPA (see [iOS install](#ios-iphone--ipad)). Both platforms share one identity — package/bundle ID
+[UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP), and the latest release carries the Android APK, and the v1.02 release carries the iOS IPA (see [iOS install](#ios-iphone--ipad)). Both platforms share one identity — package/bundle ID
 `com.ravi.musicspot` — so updates always install in place and keep your data.
 
 ## Preview
@@ -76,6 +75,8 @@ downloads (WorkManager, Wi-Fi-only option) and an offline mode.
 - AutoEq headphone profiles, searched and fetched on demand.
 - Enhance: windowed-sinc upscaler to 48/96/192 kHz (only rates your output supports), bandwidth extension and transient
   restore — labelled "Upscaled"/"Enhanced", never "Lossless".
+- **3D Sound (Spatial 3D)**: HRTF-style spatial rendering for headphones — widening, crossfeed, pinna cues and a
+  synthetic room, with an intensity slider. Virtual speakers for stereo; never labelled Atmos.
 - Pure hi-res output, and bit-perfect USB DAC mode on Android 14+.
 
 ### Lyrics
@@ -83,6 +84,8 @@ downloads (WorkManager, Wi-Fi-only option) and an offline mode.
   word-timed lyrics; then line-synced LRCLIB and AMLL (TTML), with JioSaavn, Lyrics.ovh and YouTube Music as
   fallbacks. Providers are asked in your order and the best sync available wins.
 - Synced and enhanced LRC, instrumental-break dots, romanisation, ±3 s offset, disk cache.
+- **Motion Lyrics** mode: a kinetic full-screen lyric stage over the artwork, driven by the engine's own beat and
+  tone metering.
 
 ### UI, dock & motion
 - Material 3 with dynamic colour from the artwork; Dark, Light, System and Pure black themes.
