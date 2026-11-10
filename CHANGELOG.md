@@ -4,6 +4,22 @@ All notable changes to UpZe are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and UpZe follows [Semantic Versioning](https://semver.org/).
 Android `versionCode` always increases, whatever the version name.
 
+## [v1.03] - 2026-11-10
+### Added
+- **3D Sound (Spatial 3D)** — an HRTF-style spatial stage in the sound engine for headphones: shuffler widening, crossfeed with head-shadow, pinna cues and a synthetic room, with an Intensity slider (Settings › Sound › 3D Sound). Virtual speakers for stereo; honestly labelled, never "Atmos". Off by default.
+- **Motion Lyrics** — a kinetic full-screen lyric stage over the artwork: words pop in when sung, the stage kicks on the beat (beat/tone metered from the engine's own audio), and Spotify Canvas songs keep their video clear underneath.
+- **Letter-by-letter lyrics sync** — full-screen lyrics run on a frame-accurate clock anchored to the player; lines switch just before their timestamp so they land with the voice.
+
+### Improved
+- Faster opening: settings, library, play stats, downloads and accounts load in parallel.
+- Snappier animations app-wide and lighter liquid-glass blur; ambient loops are paced on every device.
+- Home smoothness: fixed a stagger bug that re-faded shelves and rows while scrolling; downloads no longer redraw the whole Home per progress tick.
+
+### Fixed
+- Spotify Canvas videos freezing on a stale frame after leaving and returning to the player (surface re-attach, re-seek, and a stall watchdog).
+- Stability fixes throughout.
+
+
 ## [Unreleased]
 
 ## 1.0.1 — 2026-11-05
