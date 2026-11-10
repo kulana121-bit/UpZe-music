@@ -30,8 +30,15 @@ jobs:
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1); fi
+          echo "Installed platforms:"; ls "$ANDROID_HOME/platforms" || true
+          echo "Installed build-tools:"; ls "$ANDROID_HOME/build-tools" || true
+          "$SDKMANAGER" --list 2>/dev/null | grep -E "platforms;android-3[0-9]" | head -8 || true
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0"
+          if [ -d "$ANDROID_HOME/platforms/android-37" ] && [ -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
+            echo "SDK platform 37 and build-tools 36.0.0 already installed"
+          else
+            "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0" || "$SDKMANAGER" --channel=3 "platforms;android-37" "build-tools;36.0.0" || "$SDKMANAGER" "platforms;android-37.0" "build-tools;36.0.0"
+          fi
 
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
