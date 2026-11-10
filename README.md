@@ -116,6 +116,17 @@ Requirements: Android 8.0 (API 26) or newer (one APK for arm64-v8a, armeabi-v7a,
 > Coming from MusicSpot? UpZe keeps the package name `com.ravi.musicspot` and the same signing key, so it installs
 > over MusicSpot 2.0.x and keeps your library, settings and sign-ins.
 
+### Android — F-Droid (automatic updates, no account)
+
+UpZe also has its own F-Droid repository, so the F-Droid app can install it and deliver updates automatically:
+
+1. Install the **F-Droid** app from [f-droid.org](https://f-droid.org) if you don't have it yet.
+2. In F-Droid, open **Settings → Repositories → +** and add this address:
+   `https://kulana121-bit.github.io/upze-fdroid-repo/repo?fingerprint=3FAD223C53DB20A0C3EEC33A825F6A3786A7FC8EF501ADDE0930EFB3DD93A8C6`
+3. Search for **UpZe** and install it.
+
+Repository fingerprint (SHA-256): `3FAD223C53DB20A0C3EEC33A825F6A3786A7FC8EF501ADDE0930EFB3DD93A8C6`. The APKs in the repo are signed with the same permanent key as the GitHub releases above, so an F-Droid install updates a GitHub install in place (and the other way round) with your library and settings intact.
+
 ### iOS (iPhone & iPad)
 
 UpZe also runs on iOS 15 or newer, built from the shared Kotlin Multiplatform codebase in
@@ -216,7 +227,7 @@ AGP 9.3 · JUnit 4 & Robolectric.
 ## Roadmap
 
 - [x] iOS app — Kotlin Multiplatform build, distributed as a sideload IPA with an AltStore/SideStore source
-- [ ] Play Store–independent F-Droid build
+- [x] F-Droid distribution — own F-Droid repo with automatic updates (official F-Droid catalogue listing still pending)
 - [ ] Android Auto browsing
 - [ ] More widget sizes and a lock-screen lyrics view
 - [ ] Translations
