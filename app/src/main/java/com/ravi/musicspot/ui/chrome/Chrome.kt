@@ -63,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -287,7 +288,7 @@ private fun artAccent(): Color {
     var picked by remember { androidx.compose.runtime.mutableStateOf<Color?>(null) }
     LaunchedEffect(url) { picked = if (url == null) null else runCatching { com.ravi.musicspot.ui.theme.artPalette(ctx, url)?.first }.getOrNull() ?: picked }
     val still = reducedMotion()
-    val c by animateColorAsState(picked ?: primary, if (still) tween(0) else tween(980), label = "dockAccent")
+    val c by animateColorAsState(picked ?: primary, if (still) tween(0) else tween(560), label = "dockAccent") // 1.0.8: was 980
     return c
 }
 
@@ -554,9 +555,12 @@ fun MiniPlayer(
 /** v2.0.14b: the mini player's progress line; the only part that reads position, so only it recomposes. */
 @Composable
 private fun MiniProgressLine(durationMs: Long, modifier: Modifier = Modifier) {
-    val pos by Graph.player.position.collectAsState()
-    val frac = if (durationMs > 0) (pos.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-    Box(modifier.padding(horizontal = 18.dp).fillMaxWidth().height(2.dp).clip(LENS).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))) {
-        Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
-    }
+    // 1.0.7: position read only at draw time (was a recomposition + re-layout of the line on every 250 ms tick).
+    val posState = Graph.player.position.collectAsState()
+    val primary = MaterialTheme.colorScheme.primary
+    Box(modifier.padding(horizontal = 18.dp).fillMaxWidth().height(2.dp).clip(LENS).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+        .drawBehind {
+            val frac = if (durationMs > 0) (posState.value.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+            if (frac > 0f) drawRect(primary, size = androidx.compose.ui.geometry.Size(size.width * frac, size.height))
+        })
 }

@@ -134,7 +134,9 @@ class PlaybackThreadingTest {
         assertEquals("yt:seed", Graph.player.state.value.current?.id)
         // UI commands from a background thread are marshalled to main instead of touching the controller there.
         Thread { Graph.player.next() }.apply { start(); join() }
-        waitFor("next via background call") { player.currentMediaItemIndex == 1 }
+        waitFor("next via background call") { player.currentMediaItem?.mediaId == "yt:r1" }
+        // 1.0.2 smart queue: the played song leaves the queue, so the playing one is on top.
+        waitFor("played song removed") { player.currentMediaItemIndex == 0 && (0 until player.mediaItemCount).none { player.getMediaItemAt(it).mediaId == "yt:seed" } }
         assertNoThreadErrors()
         assertFalse(player.playWhenReady && player.playerError?.message?.contains("wrong thread") == true)
         println("API 29 PlayerConnection play OK: queue=${Graph.player.state.value.queue.map { it.id }}")

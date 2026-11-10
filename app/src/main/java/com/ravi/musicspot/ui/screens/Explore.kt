@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,22 +51,24 @@ import com.ravi.musicspot.yt.MoodSection
 @Composable
 fun ExploreScreen() {
     var seg by rememberSaveable { mutableStateOf(0) }
-    val segs = listOf("Charts", "New releases", "Moods & genres")
+    val segs = ExploreSegments // 1.0.5: constant list hoisted (was re-allocated every recomposition)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = pagePadding()) {
-        item { OfflineBanner() }
-        item { Text("Explore", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(start = 20.dp, top = 16.dp)) }
-        item {
+        item(key = "offline", contentType = "offline") { OfflineBanner() } // 1.0.5: key + contentType on every item
+        item(key = "title", contentType = "title") { Text("Explore", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(start = 20.dp, top = 16.dp)) }
+        item(key = "segments", contentType = "chip-row") {
             LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(segs.size) { i -> FilterChip(seg == i, { seg = i }, label = { Text(segs[i]) }) }
+                items(segs.size, key = { "seg:$it" }, contentType = { "chip" }) { i -> FilterChip(seg == i, { seg = i }, label = { Text(segs[i]) }) }
             }
         }
         when (seg) {
-            0 -> item { ChartsSection() }
-            1 -> item { ShelvesSection("new") { Graph.yt.newReleases() } }
-            else -> item { MoodsSection() }
+            0 -> item(key = "sec-charts", contentType = "sec-charts") { ChartsSection() }
+            1 -> item(key = "sec-new", contentType = "sec-new") { ShelvesSection("new") { Graph.yt.newReleases() } }
+            else -> item(key = "sec-moods", contentType = "sec-moods") { MoodsSection() }
         }
     }
 }
+
+private val ExploreSegments = listOf("Charts", "New releases", "Moods & genres")
 
 @Composable
 private fun ChartsSection() {
@@ -109,13 +112,16 @@ private fun MoodsSection() {
         is Load.Ok -> Column(Modifier.padding(horizontal = 16.dp)) {
             s.data.forEach { sec: MoodSection ->
                 Text(sec.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp))
-                sec.moods.chunked(2).forEachIndexed { row, pair ->
+                val pairs = remember(sec.moods) { sec.moods.chunked(2) } // 1.0.5: chunk once per data change
+                pairs.forEachIndexed { row, pair ->
                     Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         pair.forEachIndexed { col, m ->
                             val hue = ((row * 2 + col) * 47 + sec.title.length * 13) % 360
+                            // 1.0.5: tile gradient remembered per hue instead of re-allocated on every recomposition.
+                            val tileBrush = remember(hue) { Brush.linearGradient(listOf(Color.hsl(hue.toFloat(), 0.28f, 0.30f), Color.hsl(hue.toFloat(), 0.22f, 0.18f))) }
                             Box(
                                 Modifier.weight(1f).heightIn(min = 64.dp).pressable(onClickLabel = m.title) { nav.push(Route.Mood(m.title, m.browseId, m.params)) }
-                                    .background(Brush.linearGradient(listOf(Color.hsl(hue.toFloat(), 0.28f, 0.30f), Color.hsl(hue.toFloat(), 0.22f, 0.18f))), Ms.r16)
+                                    .background(tileBrush, Ms.r16)
                                     .padding(14.dp),
                                 contentAlignment = Alignment.CenterStart,
                             ) { Text(m.title, style = MaterialTheme.typography.titleSmall, color = Color(0xFFF2F0EE), maxLines = 2, overflow = TextOverflow.Ellipsis) }
@@ -134,7 +140,7 @@ fun MoodScreen(r: Route.Mood) {
     val header = rememberHeaderHeight() // v2.0.17
     GlassLayer(Modifier.fillMaxSize(), overlay = { GlassTopBar(r.title, onBack = { nav.back() }, height = header) }) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = pagePadding(top = 72.dp, header = header.value)) {
-            item { ShelfList(rememberLoad(r.browseId, r.params) { Graph.yt.shelvesOf(r.browseId, r.params) }) }
+            item(key = "mood-shelves", contentType = "shelf-list") { ShelfList(rememberLoad(r.browseId, r.params) { Graph.yt.shelvesOf(r.browseId, r.params) }) }
         }
     }
 }

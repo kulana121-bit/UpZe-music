@@ -2,6 +2,7 @@ package com.ravi.musicspot
 
 import com.ravi.musicspot.lyrics.LrcParser
 import com.ravi.musicspot.lyrics.Lyrics
+import com.ravi.musicspot.lyrics.LyricLine
 import com.ravi.musicspot.lyrics.LyricsChain
 import com.ravi.musicspot.lyrics.LyricsProvider
 import com.ravi.musicspot.lyrics.LyricsQuery
@@ -27,10 +28,16 @@ class LyricsChainTest {
     private val synced = Lyrics.Synced(LrcParser.parse("[00:01.00]hi"), "S")
     private val plain = Lyrics.Plain("hi", "P")
 
-    @Test fun firstSyncedWinsAndStopsChain() = runTest {
-        val a = FakeProvider("a") { synced }; val b = FakeProvider("b") { plain }
-        assertSame(synced, LyricsChain.find(listOf(a, b), q))
-        assertEquals(0, b.calls)
+    // 1.0.7: word-by-word > line-by-line > plain, whatever the provider order; ties go to the user's order.
+    @Test fun wordSyncedBeatsEarlierLineSynced() = runTest {
+        val word = Lyrics.Synced(listOf(LyricLine(1000, 2000, "hi there", emptyList(), wordSynced = true)), "W")
+        val a = FakeProvider("a") { synced }; val b = FakeProvider("b") { plain }; val c = FakeProvider("c") { word }
+        assertSame(word, LyricsChain.find(listOf(a, b, c), q))
+    }
+
+    @Test fun firstLineSyncedWinsOverPlainWithoutWord() = runTest {
+        val synced2 = Lyrics.Synced(LrcParser.parse("[00:02.00]yo"), "S2")
+        assertSame(synced, LyricsChain.find(listOf(FakeProvider("p") { plain }, FakeProvider("a") { synced }, FakeProvider("b") { synced2 }), q))
     }
 
     @Test fun plainIsFallbackWhileLaterSyncedIsPreferred() = runTest {
@@ -58,10 +65,10 @@ class LyricsChainTest {
     }
 
     @Test fun orderIsRespected() = runTest {
-        val order = mutableListOf<String>()
-        val ps = listOf("kugou", "lrclib", "netease").map { id -> FakeProvider(id) { order += id; null } }
-        assertNull(LyricsChain.find(ps, q))
-        assertEquals(listOf("kugou", "lrclib", "netease"), order)
+        val tried = mutableListOf<String>() // 1.0.7: providers run together; results are read in the user's order
+        val ps = listOf("kugou", "lrclib", "netease").map { id -> FakeProvider(id) { null } }
+        assertNull(LyricsChain.find(ps, q) { id, _ -> tried += id })
+        assertEquals(listOf("kugou", "lrclib", "netease"), tried)
     }
 }
 

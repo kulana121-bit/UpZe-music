@@ -1,5 +1,7 @@
 package com.ravi.musicspot
 
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -28,13 +30,23 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
-        setRecentsIcon()
+        // 1.0.8 fast start: the Recents icon (a bitmap render) waits until after the first frame instead of delaying it.
+        window.decorView.post { setRecentsIcon() }
         // A crash report saved by a previous run that the crash screen could not show: show it now, once.
         if (savedInstanceState == null && CrashGuard.pendingReport(this) != null) {
             runCatching { startActivity(Intent(this, CrashActivity::class.java)) }
         }
         Graph.init(application)
         openPlayer = intent?.getBooleanExtra(EXTRA_OPEN_PLAYER, false) == true
+        if (savedInstanceState == null) playPinned(intent) // 1.0.2: a pinned song shortcut
+        // 1.0.2 Privacy › Block screenshots: FLAG_SECURE follows the setting live.
+        lifecycleScope.launch {
+            Graph.awaitReady()
+            Graph.settings.state.collect { st ->
+                if (st.blockScreenshots) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
         // v2.0.15: the animated splash is gone (ui/Splash.kt stays, unused); the app opens straight away, no reveal layer.
         setContent {
             androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().trackTaps()) { // 1.0.1: tap origin for container transforms
@@ -72,6 +84,26 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false)) openPlayer = true
+        playPinned(intent)
+    }
+
+    /** 1.0.2: a home-screen song shortcut (player ⋮ › Pin to home screen) plays its song. */
+    private fun playPinned(intent: Intent?) {
+        com.ravi.musicspot.core.TrackShortcuts.playlistFrom(intent)?.let { pid ->
+            intent?.action = null
+            // The library loads in the background at start-up: wait for it, then play the playlist.
+            com.ravi.musicspot.core.IoScope.launch {
+                Graph.awaitReady()
+                val tracks = Graph.library.playlist(pid)?.tracks.orEmpty()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (tracks.isEmpty()) com.ravi.musicspot.ui.Pills.show("That playlist is gone or empty") else Graph.player.play(tracks)
+                }
+            }
+            return
+        }
+        val t = com.ravi.musicspot.core.TrackShortcuts.trackFrom(intent) ?: return
+        try { Graph.player.play(listOf(t)) } catch (e: Exception) { CrashGuard.nonFatal(this, "pinned.play", e) }
+        intent?.action = null // a rotation or re-delivery doesn't restart it
     }
 
     override fun onStart() {

@@ -190,6 +190,16 @@ class YtStreamResolver(
     private val minted = object : LinkedHashMap<String, Pair<String, PlayerClient>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, PlayerClient>>?) = size > 64
     }
+    /** 1.0.5: when each handed-out URL was minted (local clock), to tell an expired URL from a refused one. Bounded with [minted]. */
+    private val mintedAt = ConcurrentHashMap<String, Long>()
+
+    private fun remember(url: String, videoId: String, client: PlayerClient) {
+        synchronized(minted) {
+            minted[url] = videoId to client
+            mintedAt[url] = now()
+            if (mintedAt.size > 128) mintedAt.keys.retainAll(minted.keys)
+        }
+    }
 
     private fun key(videoId: String, c: PlayerClient) = "$videoId|${c.clientName}@${c.clientVersion}"
 
@@ -284,7 +294,7 @@ class YtStreamResolver(
                     Probe.OK -> {
                         preferred = client
                         com.ravi.musicspot.core.PlaybackLog.log("  ${client.clientName}: OK")
-                        synchronized(minted) { minted[url] = videoId to client }
+                        remember(url, videoId, client) // 1.0.5: also records the mint time
                         return YtResolved(url, headers, picked.copy(url = url), client.clientName)
                     }
                     Probe.REFUSED -> { refused++; errors += "${client.clientName}: stream refused (403)"; standDown(videoId, client) }
@@ -312,7 +322,7 @@ class YtStreamResolver(
                 var v = probe(r.url, r.headers, "NewPipe")
                 if (v == Probe.REFUSED) { sleep(availabilityWaitMs); v = probe(r.url, r.headers, "NewPipe") }
                 if (v == Probe.REFUSED) refused++
-                if (v == Probe.OK) { com.ravi.musicspot.core.PlaybackLog.log("  NewPipe: OK"); synchronized(minted) { minted[r.url] = videoId to PlayerClient.forStreamUrl(r.url) }; return r }
+                if (v == Probe.OK) { com.ravi.musicspot.core.PlaybackLog.log("  NewPipe: OK"); remember(r.url, videoId, PlayerClient.forStreamUrl(r.url)); return r }
                 errors += "NewPipe: stream ${v.name.lowercase()}"
             } catch (e: CancellationException) { throw e } catch (e: Throwable) {
                 com.ravi.musicspot.core.PlaybackLog.log("  NewPipe: decipher/extract failed: ${e.javaClass.simpleName}: ${e.message}")
@@ -329,7 +339,15 @@ class YtStreamResolver(
      * leading with it, so the next resolve walks on to another client.
      */
     fun onPlaybackRefused(url: String) {
+        val at = mintedAt.remove(url)
         val known = synchronized(minted) { minted.remove(url) }
+        // 1.0.5: a URL past its own `expire` time answers 403/410 after a long pause. That is not the client's fault:
+        // standing the client down sent the re-resolve to another client (often another rendition, so an audible
+        // source switch instead of a seamless continue). Expired → just forget it; the retry resolves a fresh URL.
+        if (at != null && YtUrlExpiry.isExpired(url, mintedAtMs = at, nowMs = now())) {
+            com.ravi.musicspot.core.PlaybackLog.add("  stream URL expired (not a refusal): fresh URL from the same client")
+            return
+        }
         if (known == null && url.toHttpUrlOrNull()?.host?.endsWith("googlevideo.com") != true) return
         val client = known?.second ?: PlayerClient.forStreamUrl(url)
         known?.first?.let { standDown(it, client) }
@@ -438,3 +456,33 @@ class YtStreamResolver(
 
 // v2.0.16: safe primitive access; `.jsonPrimitive` throws IllegalArgumentException when YouTube sends an object/array.
 private val JsonElement.prim: JsonPrimitive? get() = this as? JsonPrimitive
+
+/**
+ * 1.0.5: googlevideo URLs carry `expire=<epoch seconds>`; after it the URL answers 403/410. Used to refresh a URL
+ * before a resume needs it ([com.ravi.musicspot.playback.PlaybackService]), to stop a long-paused stream before its
+ * next chunk request fails ([com.ravi.musicspot.playback.ChunkedDataSource]) and to tell expiry from refusal.
+ */
+object YtUrlExpiry {
+    /** Longest lifetime believed; a longer (or negative) one means the device clock is off, so expiry is ignored. */
+    const val MAX_LIFETIME_MS = 24 * 3_600_000L
+
+    fun expiresAtMs(url: String?): Long? {
+        val u = url?.toHttpUrlOrNull() ?: return null
+        if (!u.host.endsWith("googlevideo.com")) return null
+        val s = u.queryParameter("expire")?.toLongOrNull() ?: return null
+        return if (s > 0) s * 1000 else null
+    }
+
+    /**
+     * True when [url] is past (or within [marginMs] of) its `expire` time. [mintedAtMs] is when it was obtained on
+     * this device's clock: when the lifetime it implies is implausible the clock is wrong and false is returned.
+     */
+    fun isExpired(url: String?, mintedAtMs: Long?, nowMs: Long = System.currentTimeMillis(), marginMs: Long = 0): Boolean {
+        val exp = expiresAtMs(url) ?: return false
+        if (mintedAtMs != null) {
+            val life = exp - mintedAtMs
+            if (life <= 0 || life > MAX_LIFETIME_MS) return false
+        }
+        return nowMs >= exp - marginMs
+    }
+}

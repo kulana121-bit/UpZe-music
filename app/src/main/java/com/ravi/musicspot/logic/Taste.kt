@@ -66,6 +66,11 @@ object Taste {
     fun autoplayMix(
         candidates: List<Track>, queue: List<Track>, recent: List<Track>,
         artistWeight: Map<String, Double>, likedIds: Set<String>, n: Int = 10,
+        /**
+         * 1.0.6 time-of-day: artist → how much more than usual the user plays that artist in the current part of the
+         * day (see [TimeOfDay.artistAffinity]; 1.0 = no difference). Empty = the pre-1.0.6 ranking, exactly.
+         */
+        daypartAffinity: Map<String, Double> = emptyMap(),
     ): List<Track> {
         val seenIds = HashSet<String>(); val seenKeys = HashSet<String>()
         (queue + recent).forEach { seenIds += it.id; seenKeys += key(it) }
@@ -75,7 +80,8 @@ object Taste {
         return unique.mapIndexed { i, t ->
             val base = 1.0 - i.toDouble() / unique.size
             val aw = artists(t).maxOfOrNull { artistWeight[it] ?: 0.0 } ?: 0.0
-            t to (base + 0.8 * (aw / maxW) + if (t.id in likedIds) 0.5 else 0.0)
+            val tod = if (daypartAffinity.isEmpty()) 0.0 else TimeOfDay.boost(artists(t).maxOfOrNull { daypartAffinity[it] ?: 1.0 } ?: 1.0)
+            t to (base + 0.8 * (aw / maxW) + (if (t.id in likedIds) 0.5 else 0.0) + tod)
         }.sortedByDescending { it.second }.take(n).map { it.first }
     }
 
@@ -89,6 +95,88 @@ object Taste {
     }
 
     private fun norm(s: String): String = Normalizer.normalize(s.lowercase(), Normalizer.Form.NFKC).replace(Regex("[^\\p{L}\\p{M}\\p{N}]+"), " ").trim()
+}
+
+/**
+ * 1.0.6 on-device time-of-day taste (pure, unit-tested in LogicTest). PlayStats keeps, per song, how many counted
+ * plays fell in each part of the day; this turns them into a light re-rank for autoplay and the Home "this morning /
+ * tonight" shelf, and a hint for the AI mix prompt. Nothing leaves the phone and no extra API is called.
+ *
+ * Parts of the day (local time): morning 05–12 (energetic), afternoon 12–17 (focus / beats), evening 17–22, and
+ * late night 22–05 (chill / lo-fi).
+ */
+object TimeOfDay {
+    enum class Part(val label: String, val shelfTitle: String, val mood: String) {
+        MORNING("Morning", "Your morning picks", "upbeat, energetic songs to start the day"),
+        AFTERNOON("Afternoon", "Afternoon focus", "steady, focused songs and beats to work to"),
+        EVENING("Evening", "Your evening picks", "relaxed but lively evening songs"),
+        NIGHT("Late night", "Late-night chill", "calm, chill, lo-fi late-night songs"),
+    }
+
+    const val PARTS = 4
+
+    fun partOfHour(hour: Int): Part = when (((hour % 24) + 24) % 24) {
+        in 5..11 -> Part.MORNING
+        in 12..16 -> Part.AFTERNOON
+        in 17..21 -> Part.EVENING
+        else -> Part.NIGHT
+    }
+
+    fun partAt(ms: Long, tz: java.util.TimeZone = java.util.TimeZone.getDefault()): Part {
+        val local = ms + tz.getOffset(ms)
+        val hour = Math.floorMod(local, 86_400_000L) / 3_600_000L
+        return partOfHour(hour.toInt())
+    }
+
+    /** [buckets] (plays per part, in [Part] order) with one more play in [part]. Short or missing lists are padded. */
+    fun increment(buckets: List<Int>?, part: Part): List<Int> {
+        val out = IntArray(PARTS) { i -> buckets?.getOrNull(i)?.coerceAtLeast(0) ?: 0 }
+        out[part.ordinal]++
+        return out.toList()
+    }
+
+    /**
+     * How much more (> 1) or less (< 1) than its overall share a song is played in [part]; 1.0 when there is too
+     * little data. Laplace-smoothed so a single play can't dominate: (n_part + 1) / (total + PARTS) × PARTS.
+     */
+    fun affinity(buckets: List<Int>?, part: Part): Double {
+        if (buckets.isNullOrEmpty()) return 1.0
+        val total = buckets.sum()
+        if (total <= 0) return 1.0
+        val n = buckets.getOrNull(part.ordinal) ?: 0
+        return (n + 1.0) / (total + PARTS) * PARTS
+    }
+
+    /** Artist → affinity for [part], play-weighted over the artist's songs (artists normalised like [Taste.artists]). */
+    fun artistAffinity(stats: Collection<PlayStat>, dayparts: Map<String, List<Int>>, part: Part): Map<String, Double> {
+        val sum = HashMap<String, IntArray>()
+        stats.forEach { s ->
+            val b = dayparts[s.track.id] ?: return@forEach
+            Taste.artists(s.track).forEach { a ->
+                val acc = sum.getOrPut(a) { IntArray(PARTS) }
+                for (i in 0 until PARTS) acc[i] += b.getOrNull(i) ?: 0
+            }
+        }
+        return sum.mapValues { affinity(it.value.toList(), part) }
+    }
+
+    /** Autoplay bonus for an affinity: at most +0.4 for artists clearly tied to this time, a small penalty below 1. */
+    fun boost(affinity: Double): Double = ((affinity - 1.0) * 0.2).coerceIn(-0.2, 0.4)
+
+    /**
+     * Songs the user tends to play at [part]: at least [minPlays] counted plays, played in this part more than their
+     * overall share, ranked by plays in this part × affinity (recency-decayed). Distinct by recording.
+     */
+    fun picksFor(stats: Collection<PlayStat>, dayparts: Map<String, List<Int>>, part: Part, nowMs: Long, minPlays: Int = 2, limit: Int = 20): List<Track> =
+        stats.mapNotNull { s ->
+            val b = dayparts[s.track.id] ?: return@mapNotNull null
+            val inPart = b.getOrNull(part.ordinal) ?: 0
+            if (inPart < minPlays) return@mapNotNull null
+            val a = affinity(b, part)
+            if (a <= 1.0) return@mapNotNull null
+            s.track to inPart * a * Taste.decay(s.lastMs, nowMs)
+        }.sortedWith(compareByDescending<Pair<Track, Double>> { it.second }.thenBy { it.first.title })
+            .map { it.first }.distinctBy { Taste.key(it) }.take(limit)
 }
 
 /**

@@ -13,9 +13,15 @@ enum class SourceKind(val label: String, val prefix: String) {
     LOCAL("On this device", "local"),
     SUBSONIC("Subsonic / Navidrome", "sub"),
     JELLYFIN("Jellyfin", "jf"),
-    SPOTIFY("Spotify (metadata only)", "sp");
+    SPOTIFY("Spotify (metadata only)", "sp"),
+    NETEASE("NetEase Cloud Music", "ne"),
+    MONOCHROME("Tidal / Monochrome HiFi", "mono"),
+    QOBUZ("Qobuz (Lossless Proxy)", "qob"),
+    /** 1.0.2: live radio stations (Radio Browser); no duration, never cached or downloaded. */
+    RADIO("Live radio", "rb");
 
     val playable: Boolean get() = this != SPOTIFY
+    val isLive: Boolean get() = this == RADIO
 
     companion object {
         fun ofId(id: String): SourceKind = entries.firstOrNull { id.startsWith(it.prefix + ":") } ?: YOUTUBE

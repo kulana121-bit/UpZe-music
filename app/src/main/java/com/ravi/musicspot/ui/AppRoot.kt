@@ -63,7 +63,6 @@ import com.ravi.musicspot.ui.glass.GlassLayer
 import com.ravi.musicspot.ui.motion.PageMotion
 import com.ravi.musicspot.ui.motion.reducedMotion
 import com.ravi.musicspot.ui.player.CreditsSheet
-import com.ravi.musicspot.ui.player.PlayerScreen
 import com.ravi.musicspot.ui.screens.ArtistScreen
 import com.ravi.musicspot.ui.screens.DeviceMusicScreen
 import com.ravi.musicspot.ui.screens.DownloadsScreen
@@ -122,7 +121,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
 
         LaunchedEffect(Unit) { Graph.player.connect() }
         val updCtx = androidx.compose.ui.platform.LocalContext.current
-        LaunchedEffect(Unit) { com.ravi.musicspot.update.Updater.checkOnStart(updCtx) } // 1.0.0: ≤ once per 12 h, IO
+        LaunchedEffect(Unit) { kotlinx.coroutines.delay(4000); com.ravi.musicspot.update.Updater.checkOnStart(updCtx) } // 1.0.8: after start-up settles // 1.0.0: ≤ once per 12 h, IO
         // v2.0.14: latest callback without restarting the effect.
         val openConsumed by androidx.compose.runtime.rememberUpdatedState(onOpenPlayerConsumed)
         LaunchedEffect(openPlayer, hasMini) { if (openPlayer && hasMini) { expand(); openConsumed() } }
@@ -162,7 +161,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                 val hideF = animateFloatAsState(if (navHide.hidden && navMode == com.ravi.musicspot.data.NavBarMode.HIDE) 1f else 0f, dockSpec, label = "navHide")
 
                 // Constant: the expanded chrome's height, so lists never jump while the dock changes (v2.0.6).
-                val bottomInset = navBottom + if (wide) (if (hasMini) MINI_HEIGHT + 24.dp else 16.dp) else if (settings.dockStyle == com.ravi.musicspot.data.DockStyle.EDGE) com.ravi.musicspot.ui.chrome.edgeDockHeight(hasMini) else chromeHeight(hasMini) // v2.0.16: Tray pads by its real height
+                val bottomInset = navBottom + if (wide) (if (hasMini) MINI_HEIGHT + 24.dp else 16.dp) else chromeHeight(hasMini)
 
                 // Cover morph: the artwork flies between the mini player's slot and Now Playing's slot with the sheet
                 // progress. Both slots report their resting bounds; while 0 < p < 1 a single floating copy is drawn.
@@ -188,7 +187,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                                 if (bp > 0f) {
                                     scaleX = 1f - 0.08f * bp; scaleY = 1f - 0.08f * bp
                                     translationX = 24.dp.toPx() * bp
-                                    shape = RoundedCornerShape((28f * bp).dp); clip = true
+                                    shape = RoundedCornerShape((28f * bp).coerceAtLeast(0f).dp); clip = true
                                 }
                             }) { Pages(nav, still) }
                         }
@@ -222,30 +221,6 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                             coverVisible = !morphing,
                             onCoverBounds = { miniCover = it },
                             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + CHROME_BOTTOM).then(fadeWithPlayer),
-                        ) else if (settings.dockStyle == com.ravi.musicspot.data.DockStyle.EDGE) com.ravi.musicspot.ui.chrome.EdgeDock(
-                            tabs = tabs, selected = nav.tab, onSelect = selectTab, hasMini = hasMini,
-                            morph = { morphF.value }, hide = { hideF.value },
-                            miniTarget = navHide.hidden && navMode == com.ravi.musicspot.data.NavBarMode.MINI,
-                            onExpand = { navHide.show() },
-                            hideDrop = navBottom + CHROME_BOTTOM + DOCK_HEIGHT + MINI_HEIGHT + 24.dp,
-                            onOpen = { expand() },
-                            onDrag = ::drag,
-                            onDragEnd = { total -> if (total < -80f || sheet.progress.value > 0.25f) expand() else collapse() },
-                            coverVisible = !morphing,
-                            onCoverBounds = { miniCover = it },
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + CHROME_BOTTOM).then(fadeWithPlayer),
-                        ) else if (settings.dockStyle == com.ravi.musicspot.data.DockStyle.ISLAND) com.ravi.musicspot.ui.chrome.IslandDock(
-                            tabs = tabs, selected = nav.tab, onSelect = selectTab, hasMini = hasMini,
-                            morph = { morphF.value }, hide = { hideF.value },
-                            miniTarget = navHide.hidden && navMode == com.ravi.musicspot.data.NavBarMode.MINI,
-                            onExpand = { navHide.show() },
-                            hideDrop = navBottom + CHROME_BOTTOM + DOCK_HEIGHT + MINI_HEIGHT + 24.dp,
-                            onOpen = { expand() },
-                            onDrag = ::drag,
-                            onDragEnd = { total -> if (total < -80f || sheet.progress.value > 0.25f) expand() else collapse() },
-                            coverVisible = !morphing,
-                            onCoverBounds = { miniCover = it },
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + CHROME_BOTTOM).then(fadeWithPlayer),
                         ) else DockChrome(
                             tabs = tabs, selected = nav.tab, onSelect = selectTab, hasMini = hasMini,
                             morph = { morphF.value }, hide = { hideF.value },
@@ -267,35 +242,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                         .graphicsLayer { val p = sheet.progress.value; translationY = (1f - p) * heightPx; alpha = (p * 3f).coerceIn(0f, 1f) }
                         .pointerInput(Unit) { detectTapGestures { } },
                 ) {
-                    if (settings.playerStyle == com.ravi.musicspot.data.PlayerStyle.VINYL) com.ravi.musicspot.ui.player.VinylPlayerScreen(
-                        progress = { sheet.progress.value },
-                        onCollapse = { collapse() },
-                        onDrag = ::drag,
-                        onDragEnd = { total -> if (total > 120f || sheet.progress.value < 0.75f) collapse() else expand() },
-                        coverVisible = !morphing,
-                        onCoverBounds = { r -> fullCover = r.translate(0f, -(1f - sheet.progress.value) * heightPx) },
-                        onOpenEq = { collapse(); nav.open(Tab.SETTINGS, Route.SettingsPage("sound")) },
-                        onNavigate = { nav.push(it) },
-                    ) else if (settings.playerStyle == com.ravi.musicspot.data.PlayerStyle.MINIMAL) com.ravi.musicspot.ui.player.MinimalPlayerScreen(
-                        progress = { sheet.progress.value },
-                        onCollapse = { collapse() },
-                        onDrag = ::drag,
-                        onDragEnd = { total -> if (total > 120f || sheet.progress.value < 0.75f) collapse() else expand() },
-                        coverVisible = !morphing,
-                        onCoverBounds = { r -> fullCover = r.translate(0f, -(1f - sheet.progress.value) * heightPx) },
-                        onOpenEq = { collapse(); nav.open(Tab.SETTINGS, Route.SettingsPage("sound")) },
-                        onNavigate = { nav.push(it) },
-                    ) else
-                    if (settings.playerStyle == com.ravi.musicspot.data.PlayerStyle.AURA) com.ravi.musicspot.ui.player.AuraPlayerScreen(
-                        progress = { sheet.progress.value },
-                        onCollapse = { collapse() },
-                        onDrag = ::drag,
-                        onDragEnd = { total -> if (total > 120f || sheet.progress.value < 0.75f) collapse() else expand() },
-                        coverVisible = !morphing,
-                        onCoverBounds = { r -> fullCover = r.translate(0f, -(1f - sheet.progress.value) * heightPx) },
-                        onOpenEq = { collapse(); nav.open(Tab.SETTINGS, Route.SettingsPage("sound")) },
-                        onNavigate = { nav.push(it) },
-                    ) else PlayerScreen(
+                    com.ravi.musicspot.ui.player.AuraPlayerScreen(
                         progress = { sheet.progress.value },
                         onCollapse = { collapse() },
                         onDrag = ::drag,
@@ -303,7 +250,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                         coverVisible = !morphing,
                         // Bounds include the sheet's translation; store the resting (fully open) position.
                         onCoverBounds = { r -> fullCover = r.translate(0f, -(1f - sheet.progress.value) * heightPx) },
-                        onOpenEq = { collapse(); nav.open(Tab.SETTINGS, Route.SettingsPage("sound")) },
+                        onOpenEq = { collapse(); nav.open(Tab.SETTINGS, Route.SettingsPage("sound")) }, // 1.0.7: unused now (the player opens its Sound sheet); kept for other callers
                         onNavigate = { nav.push(it) },
                     )
                 }
@@ -325,7 +272,7 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
                                 val placeable = measurable.measure(Constraints.fixed(w, h))
                                 layout(w, h) { placeable.place(0, 0) }
                             }
-                            .graphicsLayer { val t = morphT(); shadowElevation = 24.dp.toPx() * t; shape = RoundedCornerShape((12f + 8f * t).dp); clip = true },
+                            .graphicsLayer { val t = morphT(); shadowElevation = 24.dp.toPx() * t; shape = RoundedCornerShape((12f + 8f * t).coerceAtLeast(0f).dp); clip = true },
                         RectangleShape,
                     )
                 }
@@ -408,6 +355,9 @@ private fun RouteContent(r: Route) {
         Route.Liked -> LikedScreen()
         Route.History -> HistoryScreen()
         Route.Downloads -> DownloadsScreen()
+        Route.CachedSongs -> com.ravi.musicspot.ui.screens.CachedSongsScreen()
+        Route.ListenTogether -> com.ravi.musicspot.ui.screens.ListenTogetherScreen()
+        Route.Radio -> com.ravi.musicspot.ui.screens.RadioScreen()
         Route.DeviceMusic -> DeviceMusicScreen()
         Route.Saved -> SavedScreen()
         is Route.SettingsPage -> SettingsPageScreen(r.page)

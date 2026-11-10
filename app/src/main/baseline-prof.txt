@@ -16,4 +16,11 @@ HSPLcom/ravi/musicspot/ui/glass/**;->**(**)**
 HSPLcom/ravi/musicspot/ui/theme/**;->**(**)**
 HSPLcom/ravi/musicspot/data/SettingsRepo;->**(**)**
 HSPLcom/ravi/musicspot/data/AppSettings;->**(**)**
+HSPLcom/ravi/musicspot/playback/**;->**(**)**
+HSPLcom/ravi/musicspot/data/**;->**(**)**
+HSPLcom/ravi/musicspot/logic/**;->**(**)**
+HSPLcom/ravi/musicspot/ui/settings/**;->**(**)**
+HSPLcom/ravi/musicspot/core/**;->**(**)**
 Lcom/ravi/musicspot/**;
+HSPLcom/ravi/musicspot/lyrics/**;->**(**)**
+HSPLcom/ravi/musicspot/account/**;->**(**)**

@@ -5,7 +5,6 @@ package com.ravi.musicspot.ui.motion
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -20,6 +19,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +31,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -80,26 +83,44 @@ fun Modifier.sharedCover(key: String?): Modifier {
  * Play ⇄ pause as a real shape morph (two bars fold into the triangle's halves), drawn on a 24-unit grid.
  * Respects Reduce motion (snaps). Announces "Play"/"Pause" to TalkBack.
  */
+// 1.0.5: vertex tables hoisted out of the draw lambda (were rebuilt as Lists of Pairs on every draw). Per vertex:
+// play x, play y, pause x, pause y on the 24-unit grid; same values and order as before.
+private val PP_LEFT = floatArrayOf(8f, 5f, 6f, 5f, 13.5f, 8.14f, 10f, 5f, 13.5f, 15.86f, 10f, 19f, 8f, 19f, 6f, 19f)
+private val PP_RIGHT = floatArrayOf(13.5f, 8.14f, 14f, 5f, 19f, 12f, 18f, 5f, 19f, 12f, 18f, 19f, 13.5f, 15.86f, 14f, 19f)
+
+/** 1.0.5: rebuilds [path] in place (rewind, no allocation) as the quad between the play and pause shapes at [p]. */
+private fun ppQuad(path: Path, pts: FloatArray, p: Float, ox: Float, oy: Float, s: Float) {
+    path.rewind()
+    var i = 0
+    while (i < pts.size) {
+        val x = ox + (pts[i] + (pts[i + 2] - pts[i]) * p) * s
+        val y = oy + (pts[i + 1] + (pts[i + 3] - pts[i + 1]) * p) * s
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        i += 4
+    }
+    path.close()
+}
+
+/**
+ * Play ⇄ pause as a real shape morph (two bars fold into the triangle's halves), drawn on a 24-unit grid.
+ * Respects Reduce motion (snaps). Announces "Play"/"Pause" to TalkBack.
+ */
 @Composable
 fun PlayPauseIcon(playing: Boolean, modifier: Modifier = Modifier.size(24.dp), tint: Color = LocalContentColor.current) {
     val still = reducedMotion()
     val p by animateFloatAsState(if (playing) 1f else 0f, if (still) tween(0) else spring(dampingRatio = 0.8f, stiffness = 357f), label = "pp")
-    Canvas(modifier.semantics { contentDescription = if (playing) "Pause" else "Play" }) {
-        val s = size.minDimension / 24f
-        val ox = (size.width - 24f * s) / 2f; val oy = (size.height - 24f * s) / 2f
-        fun l(a: Float, b: Float) = a + (b - a) * p
-        fun quad(pts: List<Pair<Offset, Offset>>) = Path().apply {
-            pts.forEachIndexed { i, (play, pause) ->
-                val x = ox + l(play.x, pause.x) * s; val y = oy + l(play.y, pause.y) * s
-                if (i == 0) moveTo(x, y) else lineTo(x, y)
-            }
-            close()
+    // 1.0.5: Canvas(...) is Spacer(drawBehind); drawWithCache keeps two Paths per icon and rewinds them each draw instead
+    // of allocating two Paths + two vertex lists per frame of the morph. p is still read only while drawing.
+    Spacer(modifier.semantics { contentDescription = if (playing) "Pause" else "Play" }.drawWithCache {
+        val left = Path(); val right = Path()
+        onDrawBehind {
+            val s = size.minDimension / 24f
+            val ox = (size.width - 24f * s) / 2f; val oy = (size.height - 24f * s) / 2f
+            val pv = p
+            ppQuad(left, PP_LEFT, pv, ox, oy, s); ppQuad(right, PP_RIGHT, pv, ox, oy, s)
+            drawPath(left, tint); drawPath(right, tint)
         }
-        // (play shape vertex, pause shape vertex)
-        val left = listOf(Offset(8f, 5f) to Offset(6f, 5f), Offset(13.5f, 8.14f) to Offset(10f, 5f), Offset(13.5f, 15.86f) to Offset(10f, 19f), Offset(8f, 19f) to Offset(6f, 19f))
-        val right = listOf(Offset(13.5f, 8.14f) to Offset(14f, 5f), Offset(19f, 12f) to Offset(18f, 5f), Offset(19f, 12f) to Offset(18f, 19f), Offset(13.5f, 15.86f) to Offset(14f, 19f))
-        drawPath(quad(left), tint); drawPath(quad(right), tint)
-    }
+    })
 }
 
 // ---- shimmer skeletons -------------------------------------------------------------------------------------------
@@ -110,8 +131,15 @@ fun Modifier.shimmer(shape: Shape = MaterialTheme.shapes.medium): Modifier {
     val hi = MaterialTheme.colorScheme.surfaceContainerHighest
     if (reducedMotion()) return this.clip(shape).background(base)
     val t = rememberInfiniteTransition(label = "shimmer")
-    val x by t.animateFloat(-1f, 2f, infiniteRepeatable(tween(1820, easing = LinearEasing), RepeatMode.Restart), label = "sx")
-    return this.clip(shape).background(Brush.linearGradient(listOf(base, hi, base), start = Offset(x * 600f, 0f), end = Offset(x * 600f + 400f, 240f)))
+    // 1.0.5: x was read here (composition), recomposing every skeleton's parent each frame and allocating a new
+    // gradient per frame. Now x is read only while drawing; the gradient is built once (start at the origin) and the
+    // canvas is translated by x * 600, which puts it at exactly start = (x*600, 0), end = (x*600 + 400, 240) as before.
+    val x = t.animateFloat(-1f, 2f, infiniteRepeatable(tween(1820, easing = LinearEasing), RepeatMode.Restart), label = "sx")
+    val brush = remember(base, hi) { Brush.linearGradient(listOf(base, hi, base), start = Offset.Zero, end = Offset(400f, 240f)) }
+    return this.clip(shape).drawBehind {
+        val dx = x.value * 600f
+        translate(left = dx) { drawRect(brush, topLeft = Offset(-dx, 0f), size = size) }
+    }
 }
 
 @Composable
@@ -144,8 +172,8 @@ fun Modifier.staggerIn(index: Int, enabled: Boolean = true): Modifier = composed
     if (!play) return@composed this
     val a = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        delay((index.coerceIn(0, 8) * 40L))
-        a.animateTo(1f, tween(476, easing = FastOutSlowInEasing))
+        delay((index.coerceIn(0, 8) * 25L)) // 1.0.8: was 40 ms apart
+        a.animateTo(1f, tween(300, easing = FastOutSlowInEasing)) // 1.0.8: was 476 ms
     }
     this.graphicsLayer { alpha = a.value; translationY = (1f - a.value) * 16.dp.toPx() }
 }
@@ -161,19 +189,7 @@ fun <S> StateCrossfade(state: S, modifier: Modifier = Modifier, key: (S) -> Any?
         targetState = state, modifier = modifier, label = "state", contentKey = key,
         transitionSpec = {
             if (still) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
-            else androidx.compose.animation.fadeIn(tween(308, delayMillis = 84)) togetherWith androidx.compose.animation.fadeOut(tween(168))
+            else androidx.compose.animation.fadeIn(tween(200, delayMillis = 50)) togetherWith androidx.compose.animation.fadeOut(tween(110))
         },
     ) { content(it) }
-}
-
-// ---- chips -------------------------------------------------------------------------------------------------------
-
-/** Animated chip colours (selected fill glides in; content colour always readable on it). */
-@Composable
-fun chipColors(selected: Boolean): Pair<Color, Color> {
-    val c = MaterialTheme.colorScheme
-    val still = reducedMotion()
-    val bg by animateColorAsState(if (selected) c.primary else c.surfaceContainerHigh, if (still) tween(0) else tween(308), label = "chipBg")
-    val fg by animateColorAsState(if (selected) c.onPrimary else c.onSurface, if (still) tween(0) else tween(308), label = "chipFg")
-    return bg to fg
 }

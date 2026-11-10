@@ -73,7 +73,7 @@ fun Modifier.pressable(onClickLabel: String? = null, pressedScale: Float = 0.96f
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val still = reducedMotion()
-    val scale by animateFloatAsState(if (pressed && !still) pressedScale else 1f, spring(dampingRatio = 0.55f, stiffness = 306f), label = "press")
+    val scale by animateFloatAsState(if (pressed && !still) pressedScale else 1f, spring(dampingRatio = 0.6f, stiffness = 500f), label = "press")
     val h = rememberHaptics()
     val layer = this.graphicsLayer { scaleX = scale; scaleY = scale }
     return if (onLongClick == null) layer.clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClickLabel = onClickLabel) { h.tick(); onClick() }
@@ -91,7 +91,7 @@ fun Modifier.pressable(onClickLabel: String? = null, pressedScale: Float = 0.96f
 fun Modifier.pressScale(interaction: MutableInteractionSource, scale: Float = 0.96f): Modifier {
     val pressed by interaction.collectIsPressedAsState()
     val still = reducedMotion()
-    val s by animateFloatAsState(if (pressed && !still) scale else 1f, spring(dampingRatio = 0.55f, stiffness = 306f), label = "pressScale")
+    val s by animateFloatAsState(if (pressed && !still) scale else 1f, spring(dampingRatio = 0.6f, stiffness = 500f), label = "pressScale")
     return this.graphicsLayer { scaleX = s; scaleY = s }
 }
 
@@ -106,16 +106,17 @@ object MotionSpec {
     val emphasizedDecelerate = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
     val emphasizedAccelerate = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
 
-    const val SHORT = 210
-    const val MEDIUM = 420
-    const val EXIT = 280
+    // 1.0.8 faster motion: every transition keeps its shape (same curves, same moves), it just runs ~35% quicker.
+    const val SHORT = 150
+    const val MEDIUM = 280
+    const val EXIT = 190
 
-    /** Surfaces that arrive (sheets, panes): soft, no visible bounce. */
-    const val SURFACE_DAMPING = 0.86f
-    const val SURFACE_STIFFNESS = 214f
+    /** Surfaces that arrive (sheets, panes): soft, no visible bounce. 1.0.8: stiffer = arrives sooner. */
+    const val SURFACE_DAMPING = 0.88f
+    const val SURFACE_STIFFNESS = 400f
     /** Small things that pop (menus, dialogs): a touch snappier. */
     const val POP_DAMPING = 0.8f
-    const val POP_STIFFNESS = 306f
+    const val POP_STIFFNESS = 560f
 
     fun <T> surfaceSpring(visibility: T? = null) = spring(dampingRatio = SURFACE_DAMPING, stiffness = SURFACE_STIFFNESS, visibilityThreshold = visibility)
     fun <T> popSpring(visibility: T? = null) = spring(dampingRatio = POP_DAMPING, stiffness = POP_STIFFNESS, visibilityThreshold = visibility)
@@ -147,21 +148,21 @@ object MotionSpec {
     // ---- content switches ----
     /** Fade-through: old fades out fast, new fades + scales in from 92%. */
     fun fadeThrough(still: Boolean): ContentTransform = if (still) EnterTransition.None togetherWith ExitTransition.None else
-        (fadeIn(tween(294, delayMillis = 126, easing = emphasized)) + scaleIn(tween(294, delayMillis = 126, easing = emphasized), initialScale = 0.92f)) togetherWith fadeOut(tween(126))
+        (fadeIn(tween(200, delayMillis = 70, easing = emphasized)) + scaleIn(tween(200, delayMillis = 70, easing = emphasized), initialScale = 0.94f)) togetherWith fadeOut(tween(80))
     /** Shared axis X; [forward] = push. */
     fun sharedAxisX(forward: Boolean, still: Boolean): ContentTransform {
-        if (still) return fadeIn(tween(196)) togetherWith fadeOut(tween(140))
+        if (still) return fadeIn(tween(140)) togetherWith fadeOut(tween(100))
         val spec = tween<IntOffset>(MEDIUM, easing = emphasized)
         val d = if (forward) 1 else -1
-        return (slideInHorizontally(spec) { d * (it * 0.08f).toInt() } + fadeIn(tween(294, delayMillis = 84))) togetherWith
-            (slideOutHorizontally(spec) { -d * (it * 0.08f).toInt() } + fadeOut(tween(126)))
+        return (slideInHorizontally(spec) { d * (it * 0.08f).toInt() } + fadeIn(tween(200, delayMillis = 50))) togetherWith
+            (slideOutHorizontally(spec) { -d * (it * 0.08f).toInt() } + fadeOut(tween(90)))
     }
     /** Shared axis Y; [up] = opening (content rises), false = closing. Used by the player panes. */
     fun sharedAxisY(up: Boolean, still: Boolean): ContentTransform {
         if (still) return EnterTransition.None togetherWith ExitTransition.None
         val d = if (up) 1 else -1
-        return (slideInVertically(surfaceSpring(IntOffset.VisibilityThreshold)) { d * it / 5 } + fadeIn(tween(294, delayMillis = 84))) togetherWith
-            (slideOutVertically(exitTween()) { -d * it / 8 } + fadeOut(tween(126)))
+        return (slideInVertically(surfaceSpring(IntOffset.VisibilityThreshold)) { d * it / 5 } + fadeIn(tween(200, delayMillis = 50))) togetherWith
+            (slideOutVertically(exitTween()) { -d * it / 8 } + fadeOut(tween(90)))
     }
 
     /**
@@ -174,14 +175,14 @@ object MotionSpec {
         if (still) return fadeIn(tween(196)) togetherWith fadeOut(tween(140))
         if (com.ravi.musicspot.Graph.liteFx) return fadeIn(tween(180, delayMillis = 60)) togetherWith fadeOut(tween(90))
         return (scaleIn(tween(MEDIUM, easing = emphasizedDecelerate), initialScale = 0.86f, transformOrigin = origin) +
-            fadeIn(tween(210, delayMillis = 30, easing = LinearEasing))) togetherWith
-            (scaleOut(tween(MEDIUM, easing = emphasized), targetScale = 0.96f) + fadeOut(tween(168, delayMillis = 60)))
+            fadeIn(tween(150, delayMillis = 20, easing = LinearEasing))) togetherWith
+            (scaleOut(tween(MEDIUM, easing = emphasized), targetScale = 0.96f) + fadeOut(tween(120, delayMillis = 40)))
     }
     fun containerShrink(still: Boolean, origin: TransformOrigin): ContentTransform {
         if (still) return fadeIn(tween(196)) togetherWith fadeOut(tween(140))
         if (com.ravi.musicspot.Graph.liteFx) return fadeIn(tween(180, delayMillis = 60)) togetherWith fadeOut(tween(90))
-        return ((scaleIn(tween(MEDIUM, easing = emphasizedDecelerate), initialScale = 0.96f) + fadeIn(tween(210, easing = LinearEasing))) togetherWith
-            (scaleOut(tween(EXIT, easing = emphasizedAccelerate), targetScale = 0.86f, transformOrigin = origin) + fadeOut(tween(EXIT, delayMillis = 40, easing = LinearEasing))))
+        return ((scaleIn(tween(MEDIUM, easing = emphasizedDecelerate), initialScale = 0.96f) + fadeIn(tween(150, easing = LinearEasing))) togetherWith
+            (scaleOut(tween(EXIT, easing = emphasizedAccelerate), targetScale = 0.86f, transformOrigin = origin) + fadeOut(tween(EXIT, delayMillis = 20, easing = LinearEasing))))
             .apply { targetContentZIndex = -1f }
     }
 
@@ -195,22 +196,22 @@ object MotionSpec {
         val bottom = TransformOrigin(0.5f, 1f); val top = TransformOrigin(0.5f, 0f)
         return if (open)
             (scaleIn(surfaceSpring(), initialScale = 0.88f, transformOrigin = bottom) + slideInVertically(surfaceSpring(IntOffset.VisibilityThreshold)) { it / 6 } +
-                fadeIn(tween(308, delayMillis = 56, easing = emphasizedDecelerate))) togetherWith
-                (scaleOut(tween(EXIT, easing = emphasizedAccelerate), targetScale = 0.92f, transformOrigin = top) + fadeOut(tween(168)))
+                fadeIn(tween(210, delayMillis = 30, easing = emphasizedDecelerate))) togetherWith
+                (scaleOut(tween(EXIT, easing = emphasizedAccelerate), targetScale = 0.92f, transformOrigin = top) + fadeOut(tween(120)))
         else
-            (scaleIn(popSpring(), initialScale = 0.94f, transformOrigin = top) + fadeIn(tween(308, delayMillis = 84, easing = emphasizedDecelerate))) togetherWith
+            (scaleIn(popSpring(), initialScale = 0.94f, transformOrigin = top) + fadeIn(tween(210, delayMillis = 50, easing = emphasizedDecelerate))) togetherWith
                 (scaleOut(tween(EXIT, easing = emphasizedAccelerate), targetScale = 0.88f, transformOrigin = bottom) +
-                    slideOutVertically(exitTween()) { it / 6 } + fadeOut(tween(224)))
+                    slideOutVertically(exitTween()) { it / 6 } + fadeOut(tween(150)))
     }
 
     /**
      * The dock's expanded ↔ mini (and hide) progress. Critically damped so the progress never leaves 0..1: one value
      * drives the dock and the mini player together, so nothing can overshoot into the other.
      */
-    fun dockSpring() = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 194f, visibilityThreshold = 0.001f)
+    fun dockSpring() = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 340f, visibilityThreshold = 0.001f) // 1.0.8: was 194
 
     /** Bounds spring for shared cover art (container-transform-like). */
-    fun <T> containerSpring() = spring<T>(dampingRatio = 0.86f, stiffness = 194f)
+    fun <T> containerSpring() = spring<T>(dampingRatio = 0.88f, stiffness = 340f) // 1.0.8: was 194
 }
 
 object PageMotion {
@@ -224,8 +225,8 @@ object PageMotion {
     /** 1.0.1: page push / pop as a container transform out of / back into the tapped element. */
     fun pushFrom(still: Boolean, origin: androidx.compose.ui.graphics.TransformOrigin): ContentTransform = MotionSpec.containerGrow(still, origin)
     fun popTo(still: Boolean, origin: androidx.compose.ui.graphics.TransformOrigin): ContentTransform = MotionSpec.containerShrink(still, origin)
-    fun tab(still: Boolean): ContentTransform = if (still) fadeIn(tween(168)) togetherWith fadeOut(tween(126)) else MotionSpec.fadeThrough(false)
-    val playerSpring = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 214f)
+    fun tab(still: Boolean): ContentTransform = if (still) fadeIn(tween(120)) togetherWith fadeOut(tween(90)) else MotionSpec.fadeThrough(false)
+    val playerSpring = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 380f) // 1.0.8: was 214
 }
 
 /**
@@ -235,14 +236,23 @@ object PageMotion {
  */
 @Composable
 fun Modifier.staggerIn(index: Int): Modifier {
+    // 1.0.8 Home/lists freeze fix. This overload (the one every `staggerIn(i)` call resolves to) ignored the page's
+    // StaggerGroup, so EVERY row that scrolled into view faded in again, after a delay of index × 30 ms with no cap: a
+    // Home shelf with section index 15 stayed invisible for ~0.5 s while you scrolled, and dozens of fade animations
+    // ran during every fling. Now it behaves like Fx.staggerIn: only the screen's first load cascades (capped), and
+    // anything that appears later (scrolled into view, paged in) is shown at once.
     val still = reducedMotion()
-    val a = remember { androidx.compose.animation.core.Animatable(if (still) 1f else 0f) }
+    val group = LocalStaggerGroup.current
+    val play = remember { !still && (group?.admit() ?: true) }
+    if (!play) return this
+    val a = remember { androidx.compose.animation.core.Animatable(0f) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        if (!still) { kotlinx.coroutines.delay(index * 55L); a.animateTo(1f, tween(MotionSpec.MEDIUM + 140, easing = MotionSpec.emphasizedDecelerate)) }
+        kotlinx.coroutines.delay(index.coerceIn(0, 6) * 30L)
+        a.animateTo(1f, tween(MotionSpec.MEDIUM + 60, easing = MotionSpec.emphasizedDecelerate)) // 1.0.8: was 55 ms apart, 560 ms
     }
     return this.graphicsLayer { alpha = a.value; translationY = (1f - a.value) * 24.dp.toPx() }
 }
 
 fun iconSwap(still: Boolean): ContentTransform = if (still) EnterTransition.None togetherWith ExitTransition.None else
-    (scaleIn(MotionSpec.popSpring(), initialScale = 0.4f) + fadeIn(tween(MotionSpec.SHORT, delayMillis = 60))) togetherWith
+    (scaleIn(MotionSpec.popSpring(), initialScale = 0.4f) + fadeIn(tween(MotionSpec.SHORT, delayMillis = 30))) togetherWith
         (scaleOut(tween(MotionSpec.SHORT, easing = MotionSpec.emphasizedAccelerate), targetScale = 0.4f) + fadeOut(tween(MotionSpec.SHORT)))

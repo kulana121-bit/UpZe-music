@@ -80,9 +80,10 @@ import com.ravi.musicspot.yt.SearchFilter
 import kotlinx.coroutines.delay
 
 private enum class Where(val label: String, val kind: SourceKind?) {
-    YT("YouTube Music", SourceKind.YOUTUBE), JS("JioSaavn", SourceKind.JIOSAAVN), DEVICE("On this device", SourceKind.LOCAL),
-    SERVERS("My servers", null), AUDIUS("Audius", SourceKind.AUDIUS), SC("SoundCloud", SourceKind.SOUNDCLOUD),
-    JM("Jamendo", SourceKind.JAMENDO), IA("Internet Archive", SourceKind.ARCHIVE),
+    YT("YouTube Music", SourceKind.YOUTUBE), JS("JioSaavn", SourceKind.JIOSAAVN), NE("NetEase", SourceKind.NETEASE),
+    MONO("Tidal / Mono", SourceKind.MONOCHROME), QOB("Qobuz", SourceKind.QOBUZ),
+    DEVICE("On this device", SourceKind.LOCAL), SERVERS("My servers", null), AUDIUS("Audius", SourceKind.AUDIUS),
+    SC("SoundCloud", SourceKind.SOUNDCLOUD), JM("Jamendo", SourceKind.JAMENDO), IA("Internet Archive", SourceKind.ARCHIVE),
 }
 
 private data class Results(val tracks: List<Track>, val collections: List<Collection>, val top: Track? = null)
@@ -106,7 +107,7 @@ fun SearchScreen() {
     fun submit(q: String) {
         val s = q.trim(); if (s.isEmpty()) return
         input = s; query = s; suggestions = emptyList(); focus.clearFocus()
-        Graph.settings.update { it.copy(recentSearches = (listOf(s) + it.recentSearches.filterNot { r -> r.equals(s, true) }).take(10)) }
+        if (!Graph.incognito) Graph.settings.update { it.copy(recentSearches = (listOf(s) + it.recentSearches.filterNot { r -> r.equals(s, true) }).take(10)) }
     }
 
     // Real voice search: Android SpeechRecognizer; RECORD_AUDIO is requested on first use only.
@@ -159,9 +160,12 @@ fun SearchScreen() {
     val staggerGroup = remember(query, filter, where, results.state is Load.Ok) { com.ravi.musicspot.ui.motion.StaggerGroup() }
     androidx.compose.runtime.CompositionLocalProvider(com.ravi.musicspot.ui.motion.LocalStaggerGroup provides staggerGroup) {
     val stillSug = com.ravi.musicspot.ui.motion.reducedMotion()
+    // 1.0.5: de-duplicated once per result instead of inside the list builder (v2.0.14: distinct ids; play by position).
+    val songs = remember(results.state) { (results.state as? Load.Ok<Results>)?.data?.tracks?.distinctBy { it.id }.orEmpty() }
+    val uniqueSuggestions = remember(suggestions) { suggestions.distinct() }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = pagePadding()) {
-        item { OfflineBanner() }
-        item {
+        item(key = "offline", contentType = "offline") { OfflineBanner() } // 1.0.5: key + contentType on every item
+        item(key = "search-field", contentType = "search-field") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).glass(Ms.pill), verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f),
@@ -178,7 +182,7 @@ fun SearchScreen() {
             }
         }
         // v2.0.6: suggestions drop in / fade out with the shared motion specs (instant with Reduce motion).
-        if (suggestions.isNotEmpty()) items(suggestions.distinct(), key = { "sug:$it" }) { s ->
+        if (suggestions.isNotEmpty()) items(uniqueSuggestions, key = { "sug:$it" }, contentType = { "suggestion" }) { s ->
             Row(Modifier.animateItem(
                     fadeInSpec = if (stillSug) null else androidx.compose.animation.core.tween(com.ravi.musicspot.ui.motion.MotionSpec.MEDIUM, easing = com.ravi.musicspot.ui.motion.MotionSpec.emphasizedDecelerate),
                     placementSpec = if (stillSug) null else com.ravi.musicspot.ui.motion.MotionSpec.surfaceSpring(androidx.compose.ui.unit.IntOffset.VisibilityThreshold),
@@ -189,22 +193,23 @@ fun SearchScreen() {
                 IconButton(onClick = { input = s }) { Icon(Icons.AutoMirrored.Rounded.CallMade, "Use $s") }
             }
         }
-        item {
+        item(key = "where-chips", contentType = "chip-row") {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(available) { w -> FilterChip(where == w, { where = w }, label = { Text(w.label) }) }
+                items(available, key = { "where:" + it.name }, contentType = { "chip" }) { w -> FilterChip(where == w, { where = w }, label = { Text(w.label) }) }
             }
         }
-        if (where == Where.YT) item {
+        if (where == Where.YT) item(key = "filter-chips", contentType = "chip-row") {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(SearchFilter.entries.toList()) { f -> FilterChip(filter == f, { filter = f }, label = { Text(f.label) }) }
+                items(SearchFilter.entries, key = { "filter:" + it.name }, contentType = { "chip" }) { f -> FilterChip(filter == f, { filter = f }, label = { Text(f.label) }) }
             }
         }
         if (query.isBlank()) {
-            if (settings.recentSearches.isEmpty()) item {
+            if (settings.recentSearches.isEmpty()) item(key = "search-empty", contentType = "empty") {
                 EmptyState(Icons.Rounded.Search, "Search everything", "YouTube Music, JioSaavn, your device and any other sources you turn on in Settings.")
             } else {
-                item { SectionHeader("Recent searches", action = "Clear") { Graph.settings.update { it.copy(recentSearches = emptyList()) } } }
-                items(settings.recentSearches) { r ->
+                item(key = "recent-h", contentType = "section-header") { SectionHeader("Recent searches", action = "Clear") { Graph.settings.update { it.copy(recentSearches = emptyList()) } } }
+                // 1.0.5: persisted list may hold a repeat, so the key carries the position.
+                itemsIndexed(settings.recentSearches, key = { i, r -> "recent:$i:$r" }, contentType = { _, _ -> "recent-search" }) { _, r ->
                     Row(Modifier.fillMaxWidth().clickable { submit(r) }.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.width(14.dp))
                         Text(r, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
@@ -213,22 +218,21 @@ fun SearchScreen() {
                 }
             }
         } else when (val s = results.state) {
-            is Load.Loading -> item { Loading() }
-            is Load.Failed -> item { ErrorState(s.message, results.retry) }
+            is Load.Loading -> item(key = "results-loading", contentType = "loading") { Loading() }
+            is Load.Failed -> item(key = "results-error", contentType = "empty") { ErrorState(s.message, results.retry) }
             is Load.Ok -> {
                 val r = s.data
-                if (r.tracks.isEmpty() && r.collections.isEmpty()) item {
+                if (r.tracks.isEmpty() && r.collections.isEmpty()) item(key = "no-results", contentType = "empty") {
                     EmptyState(Icons.Rounded.SearchOff, "No results", if (where == Where.DEVICE && !Graph.local.available()) "Turn on music on this device in Settings → Sources." else "Try other words or another source.")
                 }
                 if (r.collections.isNotEmpty()) {
-                    item { SectionHeader(if (where == Where.IA) "Recordings" else "Albums, artists & playlists") }
-                    item { Box(Modifier.staggerIn(0)) { HorizontalShelf(r.collections, { it.id }) { c -> CollectionCard(c, 136.dp) { nav.openCollection(c) } } } }
+                    item(key = "cols-h", contentType = "section-header") { SectionHeader(if (where == Where.IA) "Recordings" else "Albums, artists & playlists") }
+                    item(key = "cols", contentType = "collection-shelf") { Box(Modifier.staggerIn(0)) { HorizontalShelf(r.collections, { it.id }) { c -> CollectionCard(c, 136.dp) { nav.openCollection(c) } } } }
                 }
                 if (r.tracks.isNotEmpty()) {
-                    item { SectionHeader("Songs") }
-                    // v2.0.14: distinct ids; play by position, not indexOf.
-                    val songs = r.tracks.distinctBy { it.id }
-                    itemsIndexed(songs, key = { _, it -> it.id }, contentType = { _, _ -> "track" }) { i, t -> Box(Modifier.staggerIn(i + 1)) { TrackRow(t, onClick = { Graph.player.play(songs, i) }, onMore = { Menus.track = t }) } }
+                    item(key = "songs-h", contentType = "section-header") { SectionHeader("Songs") }
+                    // v2.0.14: distinct ids; play by position, not indexOf. (1.0.5: `songs` hoisted above; keys namespaced.)
+                    itemsIndexed(songs, key = { _, it -> "song:" + it.id }, contentType = { _, _ -> "track" }) { i, t -> Box(Modifier.staggerIn(i + 1)) { TrackRow(t, onClick = { Graph.player.play(songs, i) }, onMore = { Menus.track = t }) } }
                 }
             }
         }

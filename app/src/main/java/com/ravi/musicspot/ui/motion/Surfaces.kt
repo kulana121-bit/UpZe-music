@@ -354,6 +354,8 @@ fun Modifier.focusBlur(): Modifier {
     val blur = android.os.Build.VERSION.SDK_INT >= 31 && !com.ravi.musicspot.Graph.lowEnd
     return this.graphicsLayer {
         val s = 1f - 0.035f * a; scaleX = s; scaleY = s
-        if (blur) { val r = 26.dp.toPx() * a; if (r > 0.5f) renderEffect = androidx.compose.ui.graphics.BlurEffect(r, r, androidx.compose.ui.graphics.TileMode.Clamp) }
+        // 1.0.8 lighter: 12 dp (was 26 dp). A full-screen RenderEffect blur's cost grows with the radius; at 12 dp the
+        // app behind a sheet still reads as out of focus, at well under half the GPU work per frame.
+        if (blur) { val r = 12.dp.toPx() * a; if (r > 0.5f) renderEffect = androidx.compose.ui.graphics.BlurEffect(r, r, androidx.compose.ui.graphics.TileMode.Clamp) }
     }
 }

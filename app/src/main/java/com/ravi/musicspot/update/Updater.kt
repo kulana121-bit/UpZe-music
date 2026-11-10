@@ -101,6 +101,9 @@ object Updater {
             val rel = UpdateLogic.parseRelease(body)
             if (rel == null) { log("latest release has no usable .apk asset"); return@withContext Result.UP_TO_DATE }
             if (!UpdateLogic.isNewer(rel.version, BuildConfig.VERSION_NAME)) return@withContext Result.UP_TO_DATE
+            // 1.0.7: the tag says newer, but is this exactly the APK already installed? (tag and versionName differ)
+            if (installedIs(app, rel)) { log("v${rel.version} is the build already installed"); return@withContext Result.UP_TO_DATE }
+            if (Graph.settings.value.skippedUpdate == "installed:" + rel.tag) { log("v${rel.version} was already installed"); return@withContext Result.UP_TO_DATE }
             if (!manual && Graph.settings.value.skippedUpdate == rel.version) { log("v${rel.version} skipped by the user"); return@withContext Result.UP_TO_DATE }
             log("v${rel.version} available (installed ${BuildConfig.VERSION_NAME})")
             _available.value = rel
@@ -154,6 +157,16 @@ object Updater {
                     if (!part.renameTo(target)) throw java.io.IOException("could not save the download")
                 }
                 log("downloaded ${target.name} (${target.length()} bytes)")
+                // 1.0.7: never hand the installer a build that is not newer than this one (it would "update" to itself
+                // and the sheet would come back on the next check). Remember the tag so it is not offered again.
+                val code = archiveVersionCode(app, target)
+                if (!UpdateLogic.isUpgrade(code, installedVersionCode(app))) {
+                    log("v${rel.version} is versionCode $code, not newer than the installed ${installedVersionCode(app)}")
+                    runCatching { Graph.settings.update { it.copy(skippedUpdate = "installed:" + rel.tag) } }
+                    target.delete()
+                    _download.value = Download.Failed("You already have the latest version.")
+                    return@launch
+                }
                 _download.value = Download.Ready(target)
                 withContext(Dispatchers.Main) { install(app, target) }
             } catch (e: Exception) {
@@ -164,6 +177,28 @@ object Updater {
             }
         }
     }
+
+    private fun installedVersionCode(ctx: Context): Long = runCatching {
+        val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+        if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
+    }.getOrDefault(BuildConfig.VERSION_CODE.toLong())
+
+    private fun archiveVersionCode(ctx: Context, apk: File): Long? = runCatching {
+        val pi = ctx.packageManager.getPackageArchiveInfo(apk.path, 0) ?: return@runCatching null
+        if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
+    }.getOrNull()
+
+    /** SHA-256 of the installed base APK, computed once per process (about 7 MB, read on Dispatchers.IO). */
+    @Volatile private var installedSha: String? = null
+    private fun installedIs(ctx: Context, rel: UpdateLogic.Release): Boolean = runCatching {
+        val apk = File(ctx.applicationInfo.sourceDir)
+        val sha = if (rel.apkSha256 == null) null else installedSha ?: run {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            apk.inputStream().use { input -> val buf = ByteArray(64 * 1024); while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) } }
+            md.digest().joinToString("") { "%02x".format(it) }.also { installedSha = it }
+        }
+        UpdateLogic.isInstalledBuild(rel, sha, apk.length())
+    }.getOrDefault(false)
 
     /** True when the installer may be opened; otherwise opens the "Install unknown apps" screen for UpZe. */
     fun ensureInstallPermission(ctx: Context): Boolean {

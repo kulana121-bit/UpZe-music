@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,10 +59,15 @@ fun SwipeRow(onSwipeRight: () -> Unit, onSwipeLeft: () -> Unit, enabled: Boolean
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val widthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val threshold = widthPx * SWIPE_THRESHOLD
-        val x = offset.value
-        if (x != 0f) {
-            val toRight = x > 0
-            val past = abs(x) >= threshold
+        // 1.0.5: the offset was read in composition, so every drag frame recomposed the whole row (artwork, texts,
+        // download/liked badges). Only the coarse phase is read here now: 0 = idle, ±1 = revealing right/left,
+        // ±2 = past the threshold. The per-frame translation stays in the graphicsLayer block.
+        val phase by remember(threshold) {
+            derivedStateOf { val x = offset.value; when { x == 0f -> 0; x > 0 -> if (x >= threshold) 2 else 1; else -> if (-x >= threshold) -2 else -1 } }
+        }
+        if (phase != 0) {
+            val toRight = phase > 0
+            val past = abs(phase) == 2
             val bg = if (toRight) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer
             val fg = if (toRight) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
             Row(Modifier.matchParentSize().background(bg.copy(alpha = if (past) 1f else 0.7f)).padding(horizontal = 24.dp),
@@ -73,7 +79,7 @@ fun SwipeRow(onSwipeRight: () -> Unit, onSwipeLeft: () -> Unit, enabled: Boolean
                 Text(if (toRight) "Play next" else "Add to queue", color = fg, style = MaterialTheme.typography.labelLarge)
             }
         }
-        Box(Modifier.graphicsLayer { translationX = offset.value }.background(if (x != 0f) MaterialTheme.colorScheme.background else androidx.compose.ui.graphics.Color.Transparent)
+        Box(Modifier.graphicsLayer { translationX = offset.value }.background(if (phase != 0) MaterialTheme.colorScheme.background else androidx.compose.ui.graphics.Color.Transparent)
             .pointerInput(widthPx) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)

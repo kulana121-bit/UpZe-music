@@ -32,6 +32,10 @@ class ChunkedDataSource(private val upstream: HttpDataSource, private val chunk:
     private var lastChunk = false
     private var chunkRead = 0L        // v2.0.14: bytes read from the current chunk
     private var zeroChunks = 0        // v2.0.14: consecutive chunks that yielded no data
+    /** 1.0.5: server clock − device clock (from the first chunk's `Date` header), so `expire` is read on the server's clock. */
+    private var serverSkewMs = 0L
+    /** 1.0.5: false when the server served a URL our clock calls expired (clock unreliable: let the server decide). */
+    private var expiryCheck = true
 
     override fun addTransferListener(transferListener: TransferListener) = upstream.addTransferListener(transferListener)
 
@@ -43,6 +47,9 @@ class ChunkedDataSource(private val upstream: HttpDataSource, private val chunk:
         zeroChunks = 0 // v2.0.14:
         endPos = if (dataSpec.length != C.LENGTH_UNSET.toLong()) dataSpec.position + dataSpec.length else C.LENGTH_UNSET.toLong()
         openChunk()
+        // 1.0.5: learn the server's clock; a URL the server just served is live whatever our clock says.
+        serverSkewMs = serverDateMs(upstream.responseHeaders)?.let { it - System.currentTimeMillis() }?.takeIf { kotlin.math.abs(it) < MAX_SKEW_MS } ?: 0L
+        expiryCheck = !urlExpired(dataSpec.uri)
         val total = totalFromContentRange(upstream.responseHeaders)
         if (endPos == C.LENGTH_UNSET.toLong() && total != null) endPos = total
         return if (endPos != C.LENGTH_UNSET.toLong()) endPos - dataSpec.position else C.LENGTH_UNSET.toLong()
@@ -77,6 +84,14 @@ class ChunkedDataSource(private val upstream: HttpDataSource, private val chunk:
             if (endPos == C.LENGTH_UNSET.toLong() && lastChunk) return C.RESULT_END_OF_INPUT
             // v2.0.14: guard against an endless loop of empty chunks.
             if (chunkRead == 0L) { if (++zeroChunks >= 3) throw IOException("no data") } else zeroChunks = 0
+            // 1.0.5: after a long pause this open DataSource still holds the URL it was opened with. Once that URL is
+            // past its `expire` time the next chunk would only get 403/410; fail fast with a typed error instead, which
+            // SeamlessRetryPolicy turns into "resolve a fresh URL and continue at this byte offset" (never a skip).
+            val u = spec?.uri
+            if (expiryCheck && urlExpired(u)) {
+                PlaybackLog.add("Stream URL expired after a pause: refreshing it at byte $nextPos")
+                throw StreamUrlExpiredException(u.toString(), nextPos)
+            }
             upstream.close()
             openChunk()
         }
@@ -84,7 +99,10 @@ class ChunkedDataSource(private val upstream: HttpDataSource, private val chunk:
 
     override fun getUri(): Uri? = upstream.uri ?: spec?.uri
     override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
-    override fun close() { spec = null; upstream.close() }
+    override fun close() { spec = null; expiryCheck = true; serverSkewMs = 0L; upstream.close() }
+
+    private fun urlExpired(uri: Uri?): Boolean =
+        com.ravi.musicspot.yt.YtUrlExpiry.isExpired(uri?.toString(), mintedAtMs = null, nowMs = System.currentTimeMillis() + serverSkewMs, marginMs = EXPIRY_MARGIN_MS)
 
     class Factory(private val upstream: HttpDataSource.Factory) : DataSource.Factory {
         override fun createDataSource(): DataSource = ChunkedDataSource(upstream.createDataSource())
@@ -95,6 +113,20 @@ class ChunkedDataSource(private val upstream: HttpDataSource, private val chunk:
         const val CHUNK_BYTES = 1L shl 20
 
         fun isGoogleVideo(uri: Uri?): Boolean = uri?.host?.endsWith("googlevideo.com") == true
+
+        /** 1.0.5: a chunk is not started this close to the URL's expiry (a 1 MB chunk takes well under this). */
+        const val EXPIRY_MARGIN_MS = 20_000L
+        /** 1.0.5: a `Date` header further off than this is ignored. */
+        private const val MAX_SKEW_MS = 7 * 24 * 3_600_000L
+
+        /** 1.0.5: the HTTP `Date` response header in epoch ms, or null. */
+        fun serverDateMs(headers: Map<String, List<String>>): Long? {
+            val v = headers.entries.firstOrNull { it.key.equals("Date", true) }?.value?.firstOrNull() ?: return null
+            return runCatching {
+                java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US)
+                    .apply { timeZone = java.util.TimeZone.getTimeZone("GMT") }.parse(v)?.time
+            }.getOrNull()
+        }
 
         /** "bytes 0-1048575/3456789" → 3456789. */
         fun totalFromContentRange(headers: Map<String, List<String>>): Long? =
@@ -129,3 +161,6 @@ class ChunkedDataSource(private val upstream: HttpDataSource, private val chunk:
         fun httpFactory(): OkHttpDataSource.Factory = OkHttpDataSource.Factory(mediaClient).setDefaultRequestProperties(mapOf("User-Agent" to Http.BROWSER_UA))
     }
 }
+
+/** 1.0.5: the open googlevideo URL passed its `expire` time (long pause); resolve a fresh one and resume at [position]. */
+class StreamUrlExpiredException(val url: String, val position: Long) : IOException("Stream URL expired (resume at byte $position)")

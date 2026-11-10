@@ -49,9 +49,9 @@ class SyncManager {
                 val history = runCatching { yt.history() }.getOrDefault(emptyList())
                 Graph.library.mergeHistory(history)
                 _yt.value = Status(false, "${liked.size} likes · $plCount playlists · ${albums.size} albums · ${subs.size} artists · ${history.size} history", atMs = System.currentTimeMillis())
-            } catch (e: Exception) {
+            } catch (e: Throwable) { // 1.0.7: see syncSpotify
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _yt.value = Status(false, "Sync failed: ${e.message}", true, System.currentTimeMillis())
+                _yt.value = Status(false, "Sync failed: ${e.message ?: e.javaClass.simpleName}", true, System.currentTimeMillis())
             }
         }
     }
@@ -78,9 +78,11 @@ class SyncManager {
                     else Graph.library.upsertSynced("spotify:${p.id}", p.name, resolved, p.imageUrl)
                 }
                 _spotify.value = Status(false, "${lists.size} playlists · $matched of $total songs matched to playable sources", atMs = System.currentTimeMillis())
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // 1.0.7: Throwable, not Exception: an Error on this IO thread (OutOfMemoryError on a 2 GB phone with a
+                // big library, a regex StackOverflowError on Spotify's script) used to take the whole app down.
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _spotify.value = Status(false, "Sync failed: ${e.message}", true, System.currentTimeMillis())
+                _spotify.value = Status(false, "Sync failed: ${e.message ?: e.javaClass.simpleName}", true, System.currentTimeMillis())
             }
         }
     }
@@ -89,7 +91,9 @@ class SyncManager {
     private suspend fun matchAll(tracks: List<Track>): List<Track> = coroutineScope {
         val gate = Semaphore(4)
         val found = mutableMapOf<String, Track>()
-        val out = tracks.map { t ->
+        // 1.0.7: songs are matched in chunks of 64 (was one coroutine per song all at once: thousands of suspended
+        // jobs and their responses alive together on a 2 GB phone). Same 4-way parallelism, same results and order.
+        val out = tracks.chunked(64).flatMap { chunk -> chunk.map { t ->
             async {
                 Graph.library.cachedMatch(t.nativeId)?.let { return@async it }
                 gate.withPermit {
@@ -99,7 +103,7 @@ class SyncManager {
                     best ?: t
                 }
             }
-        }.awaitAll()
+        }.awaitAll() }
         if (found.isNotEmpty()) Graph.library.rememberMatches(found)
         out
     }

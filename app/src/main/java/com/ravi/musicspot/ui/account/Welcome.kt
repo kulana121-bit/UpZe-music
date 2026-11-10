@@ -237,6 +237,8 @@ private fun ColumnScope.SourcesStep() {
         SourceRow("Music on this device", "Your own files, including FLAC/ALAC/WAV. Asks for permission only if you turn it on.", SourceKind.LOCAL in s.enabledSources, !asking) { toggle(SourceKind.LOCAL, it) }
         SourceRow(SourceKind.YOUTUBE.label, "The main catalogue", SourceKind.YOUTUBE in s.enabledSources) { toggle(SourceKind.YOUTUBE, it) }
         SourceRow(SourceKind.JIOSAAVN.label, "Indian & international music, 320 kbps", SourceKind.JIOSAAVN in s.enabledSources) { toggle(SourceKind.JIOSAAVN, it) }
+        SourceRow(SourceKind.NETEASE.label, "Lossless FLAC (up to 24-bit) & 320 kbps", SourceKind.NETEASE in s.enabledSources) { toggle(SourceKind.NETEASE, it) }
+        SourceRow(SourceKind.MONOCHROME.label, "Tidal catalogue, Lossless FLAC 16-bit / 24-bit Hi-Res", SourceKind.MONOCHROME in s.enabledSources) { toggle(SourceKind.MONOCHROME, it) }
         SourceRow(SourceKind.AUDIUS.label, "Independent artists, up to 320 kbps", SourceKind.AUDIUS in s.enabledSources) { toggle(SourceKind.AUDIUS, it) }
         SourceRow(SourceKind.SOUNDCLOUD.label, "Remixes and uploads", SourceKind.SOUNDCLOUD in s.enabledSources) { toggle(SourceKind.SOUNDCLOUD, it) }
         SourceRow(SourceKind.ARCHIVE.label, "Live recordings and public domain, often FLAC", SourceKind.ARCHIVE in s.enabledSources) { toggle(SourceKind.ARCHIVE, it) }

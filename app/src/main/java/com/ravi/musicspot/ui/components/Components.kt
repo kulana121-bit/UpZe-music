@@ -69,7 +69,6 @@ import com.ravi.musicspot.Graph
 import com.ravi.musicspot.data.DownloadEntry
 import com.ravi.musicspot.model.Collection
 import com.ravi.musicspot.model.Track
-import com.ravi.musicspot.playback.NowStream
 import com.ravi.musicspot.ui.glass.glass
 import com.ravi.musicspot.ui.motion.pressable
 import com.ravi.musicspot.ui.motion.sharedCover
@@ -112,18 +111,28 @@ fun sizedArtUrl(url: String, px: Int): String {
     if (px <= 0) return url
     val bucket = when { px <= 160 -> 160; px <= 320 -> 320; px <= 544 -> 544; else -> if (Graph.liteFx) 544 else 1080 } // 1.0.1: lite cap
     return when {
-        ("googleusercontent.com" in url || "ggpht.com" in url) && Regex("=w\\d+-h\\d+").containsMatchIn(url) ->
-            url.replace(Regex("=w\\d+-h\\d+"), "=w$bucket-h$bucket")
-        "saavncdn.com" in url && Regex("\\d+x\\d+").containsMatchIn(url) ->
-            url.replace(Regex("\\d+x\\d+"), if (bucket <= 160) "150x150" else "500x500")
+        ("googleusercontent.com" in url || "ggpht.com" in url) && GoogleSizeRe.containsMatchIn(url) ->
+            url.replace(GoogleSizeRe, "=w$bucket-h$bucket")
+        "saavncdn.com" in url && SaavnSizeRe.containsMatchIn(url) ->
+            url.replace(SaavnSizeRe, if (bucket <= 160) "150x150" else "500x500")
         else -> url
     }
 }
 
+// 1.0.5: compiled once (were compiled up to twice per call, i.e. per artwork per new size bucket).
+private val GoogleSizeRe = Regex("=w\\d+-h\\d+")
+private val SaavnSizeRe = Regex("\\d+x\\d+")
+
 @Composable
 private fun ArtPlaceholder() {
-    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.surfaceContainerHigh))), contentAlignment = Alignment.Center) {
-        Icon(Icons.Rounded.MusicNote, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(28.dp))
+    // 1.0.5: brush and tint remembered per theme colours (this placeholder is drawn under every list artwork until it loads).
+    val a = MaterialTheme.colorScheme.surfaceContainerHighest
+    val b = MaterialTheme.colorScheme.surfaceContainerHigh
+    val onVar = MaterialTheme.colorScheme.onSurfaceVariant
+    val brush = remember(a, b) { Brush.linearGradient(listOf(a, b)) }
+    val tint = remember(onVar) { onVar.copy(alpha = 0.6f) }
+    Box(Modifier.fillMaxSize().background(brush), contentAlignment = Alignment.Center) {
+        Icon(Icons.Rounded.MusicNote, null, tint = tint, modifier = Modifier.size(28.dp))
     }
 }
 
@@ -141,6 +150,12 @@ fun TrackRow(
     val downloads by Graph.downloads.items.collectAsState()
     val liked by Graph.library.data.collectAsState()
     val press = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    // 1.0.5: per-row derived values remembered: the liked scan was O(liked) per row on every recomposition, and the
+    // meta line (list + joinToString + duration format) was rebuilt on every recomposition of the row.
+    val isLiked = remember(liked.liked, t.id) { liked.liked.any { it.id == t.id } }
+    val meta = remember(t.artist, t.album, t.title, t.durationMs) {
+        listOfNotNull(t.artist.ifBlank { null }, t.album?.takeIf { it.isNotBlank() && it != t.title }, t.durationMs.takeIf { it > 0 }?.let(::formatTime)).joinToString(" · ")
+    }
     // v2.0.5: rows with a menu (album, playlist, artist, search, liked/history lists) get swipe actions; the queue does not.
     SwipeRow(enabled = onMore != null,
         onSwipeRight = { Graph.player.playNext(t); com.ravi.musicspot.ui.Pills.show("Playing next") },
@@ -159,8 +174,8 @@ fun TrackRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (t.explicit) { Badge("E"); Spacer(Modifier.width(4.dp)) }
                 if (downloads[t.id]?.state == DownloadEntry.State.DONE) { Icon(Icons.Rounded.DownloadDone, "Downloaded", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(4.dp)) }
-                if (liked.liked.any { it.id == t.id }) { Icon(Icons.Rounded.Favorite, "Liked", Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(4.dp)) }
-                Text(listOfNotNull(t.artist.ifBlank { null }, t.album?.takeIf { it.isNotBlank() && it != t.title }, t.durationMs.takeIf { it > 0 }?.let(::formatTime)).joinToString(" · "),
+                if (isLiked) { Icon(Icons.Rounded.Favorite, "Liked", Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(4.dp)) }
+                Text(meta,
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -217,7 +232,7 @@ fun <T> HorizontalShelf(items: List<T>, key: (T) -> Any, content: @Composable (T
     // v2.0.14: duplicate keys crash LazyRow; dedupe by key first.
     val unique = remember(items) { items.distinctBy(key) }
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(unique, key = { key(it) }) { content(it) }
+        items(unique, key = { key(it) }, contentType = { "shelf-card" }) { content(it) } // 1.0.5: contentType
     }
 }
 
@@ -292,19 +307,6 @@ fun GlassTopBar(title: String, onBack: (() -> Unit)?, height: androidx.compose.r
     }
 }
 
-/** Real quality badges: source line + "Lossless"/"Hi-Res" only when the decoder reports it, engine badge separately. */
-@Composable
-fun QualityLine(stream: NowStream?, engineBadge: String?, modifier: Modifier = Modifier) {
-    if (stream == null) return
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (stream.hiRes) Badge("HI-RES", MaterialTheme.colorScheme.primary) else if (stream.lossless) Badge("LOSSLESS", MaterialTheme.colorScheme.primary)
-        // v2.0.3: YouTube couldn't serve this track, so it plays from another source.
-        if (stream.fallbackFrom != null) Badge("Playing from ${stream.info.source.label}", MaterialTheme.colorScheme.secondary)
-        Text(stream.info.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, false))
-        engineBadge?.let { Badge(it.uppercase(), MaterialTheme.colorScheme.tertiary) }
-    }
-}
-
 @Composable
 fun PrimaryButton(text: String, icon: ImageVector? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(onClick = onClick, modifier = modifier.heightIn(min = 48.dp)) {
@@ -317,3 +319,24 @@ fun PrimaryButton(text: String, icon: ImageVector? = null, modifier: Modifier = 
 fun Centered(content: @Composable () -> Unit) = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
 
 @Suppress("unused") @Composable private fun MoreIcon() = Icon(Icons.Rounded.MoreVert, null)
+
+/**
+ * 1.0.2: a soft, "blurred" artwork wash without a blur pass. The art is decoded at 32 px and stretched with bilinear
+ * filtering, which reads as a heavy blur but costs one tiny bitmap draw. The old Modifier.blur was a full-screen
+ * RenderEffect that re-ran whenever anything above it animated, and every glass control sampling the player
+ * background had to blur that blurred layer again. Same look on every Android version; songs crossfade (700 ms).
+ */
+@Composable
+fun SoftArt(url: String?, modifier: Modifier = Modifier) {
+    val still = com.ravi.musicspot.ui.motion.reducedMotion()
+    androidx.compose.animation.Crossfade(url, modifier, animationSpec = androidx.compose.animation.core.tween(if (still) 0 else 420), label = "softArt") { u -> // 1.0.8: was 700
+        if (u != null) {
+            val ctx = coil3.compose.LocalPlatformContext.current
+            val req = androidx.compose.runtime.remember(u) { coil3.request.ImageRequest.Builder(ctx).data(sizedArtUrl(u, 120)).size(32, 32).build() }
+            coil3.compose.AsyncImage(
+                model = req, contentDescription = null, contentScale = ContentScale.Crop,
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.Low, modifier = Modifier.fillMaxSize(),
+            )
+        } else Box(Modifier.fillMaxSize())
+    }
+}

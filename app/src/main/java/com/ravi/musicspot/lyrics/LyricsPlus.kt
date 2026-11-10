@@ -7,11 +7,13 @@ package com.ravi.musicspot.lyrics
 import com.ravi.musicspot.core.Http
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeoutOrNull
@@ -38,10 +40,8 @@ import okhttp3.Request
 object LyricsPlus {
     private val SERVERS = listOf(
         "https://lyricsplus.binimum.org",
+        "https://lyricsplus.atomix.one",
         "https://lyricsplus.prjktla.my.id",
-        "https://lyricsplus.prjktla.workers.dev",
-        "https://lyricsplus-seven.vercel.app",
-        "https://lyrics-plus-backend.vercel.app",
     )
     private const val USER_AGENT = "UpZe/2.0 (GPL-3.0; based on OpenTune)"
     /** How long the last good server has before the rest are asked too. */
@@ -57,21 +57,24 @@ object LyricsPlus {
         val cleaned = TrackNameCleaner.clean(title, artist)
         val first = lastGood.get()
         if (first != null) {
-            withTimeoutOrNull(HEAD_START_MS) { runCatching { ask(first, cleaned, durationMs, album) }.getOrNull() }
+            // 1.0.5: runCatching also caught the caller's CancellationException (track changed), and the lookup then
+            // went on to race every server anyway. Only real failures are swallowed now.
+            withTimeoutOrNull(HEAD_START_MS) { try { ask(first, cleaned, durationMs, album) } catch (e: CancellationException) { throw e } catch (e: Exception) { null } }
                 ?.let { return it }
+            kotlin.coroutines.coroutineContext.ensureActive()
         }
         return race(SERVERS.filter { it != first }, cleaned, durationMs, album)
     }
 
     /** Asks every server at once; the first one with lyrics wins and the rest are dropped. */
     private suspend fun race(servers: List<String>, cleaned: TrackNameCleaner.Cleaned, durationMs: Long, album: String?): Lyrics? {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.ravi.musicspot.core.BackgroundFaults)
         val winner = CompletableDeferred<Lyrics?>()
         var left = servers.size
         val lock = Any()
         servers.forEach { server ->
             scope.launch {
-                val found = runCatching { ask(server, cleaned, durationMs, album) }.getOrNull()
+                val found = try { ask(server, cleaned, durationMs, album) } catch (e: CancellationException) { throw e } catch (e: Exception) { null } // 1.0.5
                 synchronized(lock) {
                     left--
                     if (found != null) winner.complete(found) else if (left == 0) winner.complete(null)

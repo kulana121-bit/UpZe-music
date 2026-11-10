@@ -8,6 +8,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.rounded.Close
+import com.ravi.musicspot.ui.glass.glassSheet
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -82,21 +87,35 @@ private fun supportedRates(ctx: Context): List<Int> {
 
 @Composable
 fun SoundPage() {
+    val st = rememberSoundState()
+    SettingsScaffold("Sound") { soundItems(st) }
+}
+
+/** 1.0.7: what the Sound controls read; shared by the Settings page and the in-player Sound sheet. */
+internal class SoundUiState(val s: com.ravi.musicspot.data.AppSettings, val status: com.ravi.musicspot.dsp.EngineStatus, val rates: List<Int>,
+                            val autoEqOpen: Boolean, val setAutoEq: (Boolean) -> Unit)
+
+@Composable
+internal fun rememberSoundState(): SoundUiState {
     val s by Graph.settings.state.collectAsState()
     val status by EngineAudioProcessor.status.collectAsState()
     val ctx = LocalContext.current
     val rates = remember { supportedRates(ctx) }
+    var autoEqOpen by remember { mutableStateOf(false) }
+    return SoundUiState(s, status, rates, autoEqOpen) { autoEqOpen = it }
+}
+
+/** The Sound controls as list items (Settings › Sound and the player's Sound sheet show exactly the same controls). */
+internal fun androidx.compose.foundation.lazy.LazyListScope.soundItems(st: SoundUiState) {
+    val s = st.s; val status = st.status; val rates = st.rates; val autoEqOpen = st.autoEqOpen; val setAutoEq = st.setAutoEq
     val eq = s.eq
     val pure = s.pureHiRes || s.bitPerfectUsb
-    var autoEqOpen by remember { mutableStateOf(false) }
-
-    SettingsScaffold("Sound") {
-        item {
+        item(key = "soundpage-1", contentType = "static") {
             Group {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(when {
                         pure -> "Bypassed: pure hi-res / bit-perfect output is on (Settings › Playback)"
-                        !eq.enabled -> "Engine idle — EQ off"
+                        !eq.enabled -> status.badge?.let { "EQ off · $it" } ?: "Engine idle — EQ off"
                         eq.bypassB -> "B: bypass (bit-exact pass-through)"
                         else -> listOfNotNull(if (status.eqActive) "EQ active" else "EQ flat", status.badge,
                             status.detectedCutoffHz?.let { "source cutoff ~${it / 1000} kHz" },
@@ -120,19 +139,19 @@ fun SoundPage() {
             }
         }
 
-        item {
+        item(key = "soundpage-2", contentType = "static") {
             Group("Presets") {
                 ChoiceRow(null, EqPresets.graphic.keys.toList(), eq.preset, { it }) { name ->
                     updEq { it.copy(graphic = EqPresets.graphic.getValue(name), preset = name, parametricOn = if (it.preset.startsWith("AutoEq")) false else it.parametricOn) }
                 }
                 RowDivider()
                 NavRowLike(Icons.Rounded.Headphones, "AutoEq headphone correction",
-                    if (eq.preset.startsWith("AutoEq")) eq.preset.removePrefix("AutoEq · ") else "Search 8,000+ measured headphones") { autoEqOpen = !autoEqOpen }
+                    if (eq.preset.startsWith("AutoEq")) eq.preset.removePrefix("AutoEq · ") else "Search 8,000+ measured headphones") { setAutoEq(!autoEqOpen) }
             }
         }
-        if (autoEqOpen) item { AutoEqSearch { autoEqOpen = false } }
+        if (autoEqOpen) item { AutoEqSearch { setAutoEq(false) } }
 
-        item {
+        item(key = "soundpage-3", contentType = "static") {
             Group("10-band graphic") {
                 EqConfig.GRAPHIC_FREQS.forEachIndexed { i, f ->
                     SliderRow("${hz(f)} Hz", eq.graphic.getOrElse(i) { 0.0 }.toFloat(), -12f..12f, db(eq.graphic.getOrElse(i) { 0.0 }), enabled = eq.enabled && !pure) { v ->
@@ -144,7 +163,7 @@ fun SoundPage() {
             }
         }
 
-        item {
+        item(key = "soundpage-4", contentType = "static") {
             Group("Parametric") {
                 SwitchRow("Parametric bands", "Peak, shelf and pass filters with frequency, gain and Q (added on top of the graphic EQ)", eq.parametricOn, enabled = eq.enabled && !pure) { v -> updEq { it.copy(parametricOn = v) } }
                 if (eq.parametricOn) {
@@ -163,7 +182,7 @@ fun SoundPage() {
             }
         }
 
-        item {
+        item(key = "soundpage-5", contentType = "static") {
             Group("Gain & space") {
                 SliderRow("Preamp", eq.preampDb.toFloat(), -12f..6f, db(eq.preampDb), enabled = eq.enabled && !pure) { v -> updEq { it.copy(preampDb = (v * 2).roundToInt() / 2.0) } }
                 SwitchRow("Automatic headroom", "Lowers the preamp by the curve's highest boost so nothing clips", eq.autoHeadroom, enabled = eq.enabled && !pure) { v -> updEq { it.copy(autoHeadroom = v) } }
@@ -177,7 +196,20 @@ fun SoundPage() {
             }
         }
 
-        item {
+        // 1.0.8: 3D Sound (Spatial 3D). Honest label: virtual speakers for stereo on headphones, not Dolby Atmos.
+        item(key = "soundpage-3d", contentType = "static") {
+            Group("3D Sound", footer = "For headphones. Places your stereo music in front of you, like two speakers in a room: wider image, " +
+                "head-shadowed crossfeed, a front cue and short early reflections. It's virtual spatial processing of your stereo music; " +
+                "it doesn't add surround or height channels the recording doesn't have. Mono sources stay as they are.") {
+                SwitchRow("Spatial 3D", if (pure) "Off while pure hi-res / bit-perfect output is on" else "HRTF-style headphone spatializer", s.spatial3d, enabled = !pure) { v ->
+                    Graph.settings.update { it.copy(spatial3d = v) }
+                }
+                SliderRow("Intensity", s.spatialIntensity, 0f..1f, "${(s.spatialIntensity * 100).roundToInt()}%", enabled = s.spatial3d && !pure,
+                    subtitle = "Low = subtle crossfeed, high = wide and roomy") { v -> Graph.settings.update { it.copy(spatialIntensity = (v * 20).roundToInt() / 20f) } }
+            }
+        }
+
+        item(key = "soundpage-6", contentType = "static") {
             Group("Enhance / Upscale", footer = buildString {
                 append("Enhance adds a gentle harmonic exciter above the cutoff a lossy file lost; it can't recover the original, so it's never labelled lossless. ")
                 append("Upscale resamples with a high-quality polyphase filter; a new rate starts with the next song. ")
@@ -190,6 +222,24 @@ fun SoundPage() {
                 RowDivider()
                 SwitchRow("Transient restore", "Subtly re-sharpens attacks softened by lossy encoding", s.transientRestore, enabled = !pure && !Graph.lowEnd) { v -> Graph.settings.update { it.copy(transientRestore = v) } }
             }
+        }
+}
+
+/**
+ * 1.0.7 (Raj): the player's EQ / Sound chip opens this sheet over the player instead of jumping to Settings. Same
+ * controls as Settings › Sound (one source of truth), in a glass sheet that springs up and can be swiped/tapped away.
+ */
+@Composable
+fun SoundSheet(visible: Boolean, onDismiss: () -> Unit) = com.ravi.musicspot.ui.motion.MotionSheet(if (visible) Unit else null, onDismiss = onDismiss) {
+    val st = rememberSoundState()
+    val h = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+        Column(Modifier.fillMaxWidth().heightIn(max = h * 0.86f).glassSheet(com.ravi.musicspot.ui.theme.Ms.r28).navigationBarsPadding()) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Sound", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                androidx.compose.material3.IconButton(onClick = onDismiss) { Icon(androidx.compose.material.icons.Icons.Rounded.Close, "Close sound settings") }
+            }
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) { soundItems(st) }
         }
     }
 }

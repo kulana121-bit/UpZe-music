@@ -18,7 +18,10 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,14 +49,18 @@ private val ENTRIES = listOf(
     Entry("accounts", Icons.Rounded.AccountCircle, "Accounts", "google youtube music spotify sign in sign out sync login"),
     Entry("sources", Icons.Rounded.Hub, "Sources", "priority order jiosaavn audius soundcloud jamendo archive navidrome subsonic jellyfin server client id"),
     Entry("quality", Icons.Rounded.HighQuality, "Quality", "auto high max lossless wifi mobile data download bitrate flac"),
-    Entry("playback", Icons.Rounded.PlayCircle, "Playback", "crossfade gapless autoplay radio sleep timer usb dac bit-perfect hi-res"),
+    Entry("playback", Icons.Rounded.PlayCircle, "Playback", "crossfade gapless autoplay radio sleep timer usb dac bit-perfect hi-res sponsorblock sponsor bluetooth headphones volume zero mute skip error"),
+    Entry("stats", Icons.Rounded.Insights, "Listen stats", "stats statistics top most played repeated songs artists albums week month year wrapped minutes"), // 1.0.2
+    Entry("ai", Icons.Rounded.AutoAwesome, "AI Integration", "ai api key openai gemini groq openrouter claude deepseek mistral mix playlist suggestion"), // 1.0.2
     Entry("sound", Icons.Rounded.Equalizer, "Sound", "equalizer eq parametric preset autoeq headphone preamp bass widener enhance upscale resampler bypass"),
-    Entry("lyrics", Icons.Rounded.Lyrics, "Lyrics", "provider order lrclib kugou netease sync offset romanize"),
+    Entry("lyrics", Icons.Rounded.Lyrics, "Lyrics", "provider order lrclib kugou netease sync offset romanize live lyrics motion lyrics kinetic animated"),
     // 1.0.1: the Customize flow and the artist picker are reachable straight from Settings (and its search).
     Entry("customize", Icons.Rounded.AutoAwesome, "Customize", "setup design look theme glass player dock home artists motion wizard run again onboarding", Route.Customize),
     Entry("artists", Icons.Rounded.Person, "Your artists", "artists favourite pick seed for you home recommendations tune", Route.Artists),
     Entry("appearance", Icons.Rounded.Palette, "Appearance", "dynamic colour color theme glass blur reduce effects motion animation haptics"),
     Entry("storage", Icons.Rounded.Storage, "Storage", "cache downloads clear space size delete"),
+    Entry("privacy", Icons.Rounded.Shield, "Privacy", "incognito private history screenshot screen recording secure clear stats"), // 1.0.2
+    Entry("backup", Icons.Rounded.Restore, "Backup & restore", "backup restore export import save file move phone liked playlists history settings"), // 1.0.2
     Entry("diagnostics", Icons.Rounded.MonitorHeart, "Diagnostics", "test probe latency reachability network source status"),
     Entry("about", Icons.Rounded.Info, "About & licenses", "version gpl license credits opentune newpipe backdrop haze media3 update updates github developer ravi"),
 )
@@ -83,6 +90,10 @@ fun SettingsHome() {
         "lyrics" -> s.lyricsOrder.filter { it in s.lyricsEnabled }.take(3).joinToString(" › ")
         "appearance" -> listOfNotNull(if (s.dynamicColor) "Dynamic colour" else null, s.glass.label, if (s.reduceMotion) "Reduced motion" else null).joinToString(" · ")
         "storage" -> "Cache limit ${if (s.cacheLimitMb >= 1024) "${s.cacheLimitMb / 1024} GB" else "${s.cacheLimitMb} MB"}"
+        "stats" -> "Your most played songs, artists and albums"
+        "ai" -> if (s.aiPreset.isNotBlank() && com.ravi.musicspot.ai.AiMix.hasKey(Graph.app)) "${com.ravi.musicspot.ai.AiMix.preset(s.aiPreset).label} · AI mixes" else "Add your API key for AI mixes"
+        "privacy" -> listOfNotNull(if (s.incognito) "Incognito on" else null, if (s.blockScreenshots) "Screenshots blocked" else null).joinToString(" · ").ifBlank { "Incognito, screenshots" }
+        "backup" -> "Save liked songs, playlists, history and settings to a file"
         "diagnostics" -> "Test every source"
         "customize" -> "Theme, glass, player, dock, home, artists and motion"
         "artists" -> if (seeds.isEmpty()) "Tune Home to artists you love" else "${seeds.size} picked"
@@ -93,7 +104,7 @@ fun SettingsHome() {
     val shown = if (q.isEmpty()) ENTRIES else ENTRIES.filter { e -> q.split(' ').filter { it.isNotBlank() }.all { t -> e.title.lowercase().contains(t) || e.keywords.contains(t) } }
 
     SettingsScaffold("Settings", back = false) {
-        item {
+        item(key = "settingshome-1", contentType = "static") {
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true, shape = Ms.pill,
                 placeholder = { Text("Search settings") }, leadingIcon = { Icon(Icons.Rounded.Search, null) },
@@ -111,7 +122,7 @@ fun SettingsHome() {
                 }
             }
         }
-        item { Box(Modifier.padding(8.dp)) { } }
+        item(key = "settingshome-2", contentType = "static") { Box(Modifier.padding(8.dp)) { } }
     }
 }
 

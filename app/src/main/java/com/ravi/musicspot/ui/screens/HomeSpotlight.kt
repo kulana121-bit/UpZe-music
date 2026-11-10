@@ -2,6 +2,7 @@
 
 package com.ravi.musicspot.ui.screens
 
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -60,8 +61,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -81,6 +82,9 @@ import androidx.compose.ui.unit.sp
 import com.ravi.musicspot.Graph
 import com.ravi.musicspot.account.Account
 import com.ravi.musicspot.data.DownloadEntry
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import com.ravi.musicspot.data.FeedShelf
 import com.ravi.musicspot.data.HomeFeedRepo
 import com.ravi.musicspot.model.Collection
@@ -93,7 +97,6 @@ import com.ravi.musicspot.ui.Tab
 import com.ravi.musicspot.ui.components.Artwork
 import com.ravi.musicspot.ui.components.EmptyState
 import com.ravi.musicspot.ui.components.OfflineBanner
-import com.ravi.musicspot.ui.glass.liquidGlass
 import com.ravi.musicspot.ui.motion.PlayPauseIcon
 import com.ravi.musicspot.ui.motion.SkeletonBox
 import com.ravi.musicspot.ui.motion.pressable
@@ -104,8 +107,8 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 
 /**
- * "Spotlight (big artwork)" Home dashboard (Settings → Appearance → Home design). Same data, sections and behaviour as
- * [AuraHomeScreen] (cached feed, pull to refresh, endless YT Music pages, offline fallbacks); only the look differs:
+ * "Spotlight (big artwork)" Home dashboard (1.0.6: the only Home design; [HomeScreen] opens it). Cached feed, pull to
+ * refresh, endless YT Music pages, offline fallbacks; the look:
  *  - a full-bleed spotlight with the current / recent / featured song's artwork edge to edge, fading into the page,
  *    greeting + big title + artist + Play and Shuffle over it (blur only on API 31+);
  *  - round shortcut bubbles (Liked, Downloads, History, On device, Search); outlined mood chips;
@@ -117,7 +120,16 @@ fun SpotlightHomeScreen() {
     val nav = LocalNav.current
     val online by Graph.online.collectAsState()
     val lib by Graph.library.data.collectAsState()
-    val dls by Graph.downloads.items.collectAsState()
+    // 1.0.8 Home smoothness: only the finished downloads matter here. Collecting the whole map recomposed (and
+    // re-sorted) the entire Home on every progress tick of every running download. Now the list is derived off the
+    // main thread and Home only hears about it when the finished set actually changes.
+    val downloadedFlow = remember {
+        Graph.downloads.items
+            .map { m -> m.values.filter { it.state == DownloadEntry.State.DONE }.sortedByDescending { it.atMs }.map { it.track } }
+            .distinctUntilChanged()
+            .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    }
+    val downloaded by downloadedFlow.collectAsState(initial = emptyList())
     val settings by Graph.settings.state.collectAsState()
     val accounts by Graph.accounts.accounts.collectAsState()
     val feed by HomeFeedRepo.feed.collectAsState()
@@ -131,15 +143,18 @@ fun SpotlightHomeScreen() {
     LaunchedEffect(online) { if (online && HomeFeedRepo.feed.value?.isEmpty != false) HomeFeedRepo.load(force = true) }
 
     val stats by Graph.playStats.data.collectAsState()
-    val favourites = remember(stats, lib.liked) { com.ravi.musicspot.logic.Taste.favourites(stats.stats.values, lib.liked, System.currentTimeMillis()) }
+    val favourites = com.ravi.musicspot.ui.components.rememberOffMain(stats, lib.liked) { // 1.0.7: recomputed off the main thread
+        com.ravi.musicspot.logic.Taste.favourites(stats.stats.values, lib.liked, System.currentTimeMillis()) }
+    // 1.0.6 on-device time-of-day mix: songs this listener plays more at this part of the day (no network, no API).
+    val todPart = remember(stats) { com.ravi.musicspot.logic.TimeOfDay.partAt(System.currentTimeMillis()) }
+    val todPicks = com.ravi.musicspot.ui.components.rememberOffMain(stats, todPart) { com.ravi.musicspot.logic.TimeOfDay.picksFor(stats.stats.values, stats.dayparts, todPart, System.currentTimeMillis()) }
     val recent = remember(lib.history) { lib.history.map { it.track }.distinctBy { it.id }.take(20) }
-    val downloaded = remember(dls) { dls.values.filter { it.state == DownloadEntry.State.DONE }.sortedByDescending { it.atMs }.map { it.track } }
-    val artists = remember(lib.history, lib.liked) {
+    val artists = com.ravi.musicspot.ui.components.rememberOffMain(lib.history, lib.liked) { // 1.0.7: off the main thread
         (lib.history.map { it.track } + lib.liked).filter { (it.artistId?.startsWith("UC") == true || it.artistId?.startsWith("yt:") == true) && it.artist.isNotBlank() }
             .groupBy { it.artistId!! }.entries.sortedByDescending { it.value.size }.take(14)
-            .map { (id, ts) -> Collection(id, Collection.Kind.ARTIST, ts.first().artist.substringBefore(',').trim(), "${ts.size} plays", ts.first().artUrl) }
+            .map { (id, ts) -> Collection(id, Collection.Kind.ARTIST, ts.first().artist.substringBefore(',').trim(), "${ts.size} songs", ts.first().artUrl) } // 1.0.6: History is one row per song
     }
-    val mixes = remember(lib.playlists, lib.saved, feed) {
+    val mixes = com.ravi.musicspot.ui.components.rememberOffMain(lib.playlists, lib.saved, feed) { // 1.0.7: off the main thread
         lib.playlists.map { Collection(it.id, Collection.Kind.LOCAL_PLAYLIST, it.name, "${it.tracks.size} songs", it.artUrl ?: it.tracks.firstOrNull()?.artUrl) } +
             lib.saved + feed?.ytShelves.orEmpty().filter { it.title.contains("mix", true) }.flatMap { it.collections }
     }
@@ -158,23 +173,31 @@ fun SpotlightHomeScreen() {
     PullToRefreshBox(isRefreshing = refreshing && feed != null, onRefresh = { scope.launch { HomeFeedRepo.refresh() } }, modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val d = dims(maxWidth)
+            // 1.0.5: shelf inputs derived once per data change instead of inside item lambdas on every recomposition.
+            val moodTitles = remember(feed?.moods) { feed?.moods.orEmpty().map { it.title } }
+            val favTop = remember(favourites) { favourites.take(5) }
+            val recentRest = remember(recent) { recent.drop(1) }
+            val mixShelf = remember(mixes) { mixes.distinctBy { it.id }.take(20) }
+            val dlShelf = remember(downloaded) { downloaded.take(20) }
+            val heroAll = remember(recent, feed?.quickPicks) { (if (recent.isNotEmpty()) recent else feed?.quickPicks.orEmpty()).take(5) }
             LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = padding) {
-                item(key = "offline") { if (!online) Box(Modifier.statusBarsPadding()) { OfflineBanner() } }
+                item(key = "offline", contentType = "offline") { if (!online) Box(Modifier.statusBarsPadding()) { OfflineBanner() } } // 1.0.5: contentType on every item
                 val f = feed
                 // Spotlight: recent songs first (continue listening), else quick picks (featured); the playing song wins.
-                val heroTracks = (if (recent.isNotEmpty()) recent else f?.quickPicks.orEmpty()).take(5)
-                item(key = "s-spotlight") {
+                val heroTracks = heroAll // 1.0.8: remembered list (was rebuilt on every pass), so the spotlight can skip recomposition
+                item(key = "s-spotlight", contentType = "spotlight") {
                     SpotlightTop(ytAccount, online, heroTracks, if (recent.isNotEmpty()) "Continue listening" else "Featured for you", d)
                 }
-                item(key = "s-bubbles") { SpotlightBubbles(d, lib.liked.size, downloaded.size, recent.size) }
-                if (f != null && f.moods.isNotEmpty()) item(key = "s-moods") {
-                    SpotlightMoods(f.moods.map { it.title }, d) { i -> f.moods[i].let { m -> nav.push(Route.Mood(m.title, m.browseId, m.params)) } }
+                // 1.0.7 (Raj): the Liked / Downloads / History / On device / Search shortcut bubbles are gone from Home
+                // (all still in Library and the Search tab).
+                if (f != null && f.moods.isNotEmpty()) item(key = "s-moods", contentType = "moods") {
+                    SpotlightMoods(moodTitles, d) { i -> f.moods[i].let { m -> nav.push(Route.Mood(m.title, m.browseId, m.params)) } }
                 }
 
                 if (f == null && online && favourites.size < 2) {
                     // v2.0.14: a failed first load (no cache) used to leave the shimmer up forever; show the error with Retry.
-                    if (error == null || refreshing) item(key = "s-skeleton") { HomeSkeleton(d) }
-                    else item(key = "s-load-error") { EmptyState(Icons.Rounded.CloudOff, "Couldn't load Home", error ?: "Pull down to try again.", "Retry") { scope.launch { HomeFeedRepo.refresh() } } }
+                    if (error == null || refreshing) item(key = "s-skeleton", contentType = "skeleton") { HomeSkeleton(d) }
+                    else item(key = "s-load-error", contentType = "empty") { EmptyState(Icons.Rounded.CloudOff, "Couldn't load Home", error ?: "Pull down to try again.", "Retry") { scope.launch { HomeFeedRepo.refresh() } } }
                     return@LazyColumn
                 }
 
@@ -182,29 +205,35 @@ fun SpotlightHomeScreen() {
                 fun nextSec() = sec++
                 if (favourites.size >= 2) {
                     val i = nextSec()
-                    item(key = "s-fav-h") { SpotlightOnRepeatHeader(favourites, i, d) }
-                    item(key = "s-fav") { SpotlightTopList(favourites.take(5), d, i) }
+                    item(key = "s-fav-h", contentType = "fav-header") { SpotlightOnRepeatHeader(favourites, i, d) }
+                    item(key = "s-fav", contentType = "top-list") { SpotlightTopList(favTop, d, i) }
+                }
+                if (todPicks.size >= 4) {
+                    val i = nextSec()
+                    val shelf = Shelf(todPart.shelfTitle, todPicks)
+                    item(key = "s-tod-h", contentType = "header-row") { SpotlightHeader(todPart.shelfTitle, "What you usually play around this time", i, d) { nav.push(Route.ShelfAll(shelf)) } }
+                    item(key = "s-tod", contentType = "track-shelf") { TrackShelf(todPicks, d.card, d, i) }
                 }
                 f?.forYou?.let { spotlightShelf("s-foryou", it, d, nextSec()) } // v2.0.15: seed-artist shelf on top
                 if (f != null && f.quickPicks.isNotEmpty()) {
                     val i = nextSec()
-                    item(key = "s-qp-h") { SpotlightHeader("Quick picks", "Start radio from a song", i, d) { nav.push(Route.ShelfAll(Shelf("Quick picks", f.quickPicks))) } }
-                    item(key = "s-qp") { QuickPicks(f.quickPicks, d, i, rows = 3) }
+                    item(key = "s-qp-h", contentType = "header-row") { SpotlightHeader("Quick picks", "Start radio from a song", i, d) { nav.push(Route.ShelfAll(Shelf("Quick picks", f.quickPicks))) } }
+                    item(key = "s-qp", contentType = "quickpicks") { QuickPicks(f.quickPicks, d, i, rows = 3) }
                 }
                 if (recent.size > 1) {
                     val i = nextSec()
-                    item(key = "s-kl-h") { SpotlightHeader("Recently played", "Pick up where you left off", i, d) { nav.push(Route.History) } }
-                    item(key = "s-kl") { SpotlightRecentCards(recent.drop(1), d, i) }
+                    item(key = "s-kl-h", contentType = "header-row") { SpotlightHeader("Recently played", "Pick up where you left off", i, d) { nav.push(Route.History) } }
+                    item(key = "s-kl", contentType = "recent-cards") { SpotlightRecentCards(recentRest, d, i) }
                 }
                 if (mixes.isNotEmpty()) {
                     val i = nextSec()
-                    item(key = "s-mix-h") { SpotlightHeader("Your mixes & playlists", "From your library", i, d) { nav.select(Tab.LIBRARY) } }
-                    item(key = "s-mix") { CollectionShelf(mixes.distinctBy { it.id }.take(20), d.card * 1.12f, d, i) }
+                    item(key = "s-mix-h", contentType = "header-row") { SpotlightHeader("Your mixes & playlists", "From your library", i, d) { nav.select(Tab.LIBRARY) } }
+                    item(key = "s-mix", contentType = "collection-shelf") { CollectionShelf(mixShelf, d.card * 1.12f, d, i) }
                 }
                 if (!online && downloaded.isNotEmpty()) {
                     val i = nextSec()
-                    item(key = "s-dl-h") { SpotlightHeader("Your downloads", "Plays offline", i, d) { nav.push(Route.Downloads) } }
-                    item(key = "s-dl") { TrackShelf(downloaded.take(20), d.card, d, i) }
+                    item(key = "s-dl-h", contentType = "header-row") { SpotlightHeader("Your downloads", "Plays offline", i, d) { nav.push(Route.Downloads) } }
+                    item(key = "s-dl", contentType = "track-shelf") { TrackShelf(dlShelf, d.card, d, i) }
                 }
                 if (f != null) {
                     f.ytShelves.take(3).forEachIndexed { n, s -> spotlightShelf("s-yt$n", s, d, nextSec()) }
@@ -215,22 +244,22 @@ fun SpotlightHomeScreen() {
                     f.charts.drop(1).forEachIndexed { n, s -> spotlightShelf("s-chart${n + 1}", s, d, nextSec()) }
                     if (artists.isNotEmpty()) {
                         val i = nextSec()
-                        item(key = "s-art-h") { SpotlightHeader("Artists you like", "Based on what you play", i, d) }
-                        item(key = "s-art") { ArtistRow(artists, d, i) }
+                        item(key = "s-art-h", contentType = "header-row") { SpotlightHeader("Artists you like", "Based on what you play", i, d) }
+                        item(key = "s-art", contentType = "artist-row") { ArtistRow(artists, d, i) }
                     }
                     f.jsPlaylists?.let { spotlightShelf("s-jsp", it, d, nextSec()) }
                     f.ytShelves.drop(3).forEachIndexed { n, s -> spotlightShelf("s-ytm$n", s, d, nextSec()) }
-                    if (loadingMore) item(key = "s-more") { Row(Modifier.fillMaxWidth().padding(16.dp)) { SkeletonBox(d.card, d.card) } }
-                    if (f.isEmpty) item(key = "s-empty") {
+                    if (loadingMore) item(key = "s-more", contentType = "more") { Row(Modifier.fillMaxWidth().padding(16.dp)) { SkeletonBox(d.card, d.card) } }
+                    if (f.isEmpty) item(key = "s-empty", contentType = "empty") {
                         if (SourceKind.YOUTUBE !in settings.enabledSources && SourceKind.JIOSAAVN !in settings.enabledSources)
                             EmptyState(Icons.Rounded.PhoneAndroid, "Online sources are off", "Home comes from YouTube Music and JioSaavn. Turn one on in Settings → Sources.", "Open Sources") { nav.select(Tab.SETTINGS); nav.push(Route.SettingsPage("sources")) }
                         else EmptyState(Icons.Rounded.Download, "Couldn't load Home", error ?: "Pull down to try again.", "Retry") { scope.launch { HomeFeedRepo.refresh() } }
                     }
                 }
-                if (!online && f == null) item(key = "s-offline-empty") {
+                if (!online && f == null) item(key = "s-offline-empty", contentType = "empty") {
                     EmptyState(Icons.Rounded.CloudOff, "You're offline", "Downloads and music on this device still play.", "Downloads") { nav.push(Route.Downloads) }
                 }
-                item(key = "s-end") { Spacer(Modifier.height(24.dp)) }
+                item(key = "s-end", contentType = "end") { Spacer(Modifier.height(24.dp)) }
             }
         }
     }
@@ -238,15 +267,16 @@ fun SpotlightHomeScreen() {
 
 private fun LazyListScope.spotlightShelf(key: String, s: FeedShelf, d: HomeDims, index: Int) {
     if (s.isEmpty) return
-    item(key = "$key-h") {
+    item(key = "$key-h", contentType = "header-row") { // 1.0.5: contentType
         val nav = LocalNav.current
         val fallback = if (s.tracks.isNotEmpty()) "${s.tracks.size} songs" else "${s.collections.size} albums & playlists"
         SpotlightHeader(s.title, s.subtitle?.takeIf { it.isNotBlank() } ?: fallback, index, d) { nav.push(Route.ShelfAll(s.toShelf())) }
     }
-    if (s.tracks.isNotEmpty()) item(key = "$key-t") {
-        if (s.tracks.size >= 8 && s.collections.isEmpty()) QuickPicks(s.tracks, d, index, rows = 3) else TrackShelf(s.tracks, d.card, d, index)
+    val dense = s.tracks.size >= 8 && s.collections.isEmpty()
+    if (s.tracks.isNotEmpty()) item(key = "$key-t", contentType = if (dense) "quickpicks" else "track-shelf") {
+        if (dense) QuickPicks(s.tracks, d, index, rows = 3) else TrackShelf(s.tracks, d.card, d, index)
     }
-    if (s.collections.isNotEmpty()) item(key = "$key-c") { CollectionShelf(s.collections, d.card, d, index) }
+    if (s.collections.isNotEmpty()) item(key = "$key-c", contentType = "collection-shelf") { CollectionShelf(s.collections, d.card, d, index) }
 }
 
 // ---- pieces -------------------------------------------------------------------------------------------------------
@@ -272,9 +302,10 @@ private fun SpotlightTop(acc: Account?, online: Boolean, heroTracks: List<Track>
     var seed by remember(t?.artUrl) { mutableStateOf<Color?>(null) }
     LaunchedEffect(t?.artUrl) { seed = runCatching { com.ravi.musicspot.ui.theme.artSeed(ctx, t?.artUrl) }.getOrNull() }
     val still = reducedMotion()
-    val tint by animateColorAsState(seed ?: c.primary, if (still) snap() else tween(700), label = "spotlightTint")
+    // 1.0.8: the tint glide is read only while drawing (was read in composition: the whole spotlight recomposed on
+    // every frame of the 700 ms glide each time the song changed).
+    val tint = animateColorAsState(seed ?: c.primary, if (still) snap() else tween(700), label = "spotlightTint")
     val bg = c.background
-    val blurOk = android.os.Build.VERSION.SDK_INT >= 31
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val h = (if (d.wide) 400.dp else 360.dp) + top
 
@@ -285,24 +316,28 @@ private fun SpotlightTop(acc: Account?, online: Boolean, heroTracks: List<Track>
         }
     }
 
-    Box(Modifier.fillMaxWidth().height(h).background(lerp(tint, bg, 0.55f))) {
+    Box(Modifier.fillMaxWidth().height(h).drawBehind { drawRect(lerp(tint.value, bg, 0.55f)) }) {
         if (t != null) {
-            if (blurOk) Artwork(t.artUrl, Modifier.fillMaxSize().blur(48.dp).graphicsLayer { alpha = 0.7f; scaleX = 1.25f; scaleY = 1.25f }, RectangleShape)
+            com.ravi.musicspot.ui.components.SoftArt(t.artUrl, Modifier.fillMaxSize().clipToBounds().graphicsLayer { alpha = 0.7f; scaleX = 1.25f; scaleY = 1.25f }) // 1.0.2: no blur pass
             Artwork(
                 t.artUrl,
                 Modifier.fillMaxSize()
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithContent {
                         drawContent()
-                        drawRect(Brush.verticalGradient(0f to Color.Black, 0.55f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
+                        drawRect(SpotlightArtFadeMask, blendMode = BlendMode.DstIn) // 1.0.5: hoisted constant mask (was rebuilt every draw)
                     },
                 RectangleShape, t.title,
             )
         }
         // Dark top for the status bar + greeting, fading into the page background at the bottom.
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-            0f to Color.Black.copy(alpha = 0.6f), 0.28f to Color.Black.copy(alpha = 0.12f), 0.55f to bg.copy(alpha = 0.35f), 0.82f to bg.copy(alpha = 0.88f), 1f to bg,
-        )))
+        // 1.0.5: remembered per background colour instead of re-allocated on every recomposition (tint animation frames).
+        val pageFade = remember(bg) {
+            Brush.verticalGradient(
+                0f to Color.Black.copy(alpha = 0.6f), 0.28f to Color.Black.copy(alpha = 0.12f), 0.55f to bg.copy(alpha = 0.35f), 0.82f to bg.copy(alpha = 0.88f), 1f to bg,
+            )
+        }
+        Box(Modifier.fillMaxSize().background(pageFade))
 
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = d.gutter + 4.dp, end = d.gutter, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -337,7 +372,10 @@ private fun SpotlightTop(acc: Account?, online: Boolean, heroTracks: List<Track>
                     }
                     if (heroTracks.size > 1) {
                         Spacer(Modifier.width(10.dp))
-                        Row(Modifier.height(48.dp).liquidGlass(Ms.pill)
+                        // 1.0.8: a still glass film (sheen + rim) instead of a live backdrop blur: this pill scrolls with
+                        // the page, and the sampled blur re-rendered on every frame of every scroll over Home.
+                        Row(Modifier.height(48.dp).clip(Ms.pill).background(c.surfaceContainerHigh.copy(alpha = 0.72f))
+                            .background(SpotlightPillSheen).border(1.dp, SpotlightPillRim, Ms.pill)
                             .pressable(onClickLabel = "Shuffle ${label.lowercase()}", pressedScale = 0.94f) { Graph.player.play(heroTracks, 0, shuffle = true) }
                             .padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Shuffle, null, Modifier.size(20.dp), tint = c.onSurface)
@@ -355,6 +393,13 @@ private fun SpotlightTop(acc: Account?, online: Boolean, heroTracks: List<Track>
     }
 }
 
+// 1.0.8: still glass look for the spotlight's Shuffle pill (no live blur while scrolling).
+private val SpotlightPillSheen = Brush.verticalGradient(0f to Color.White.copy(alpha = 0.10f), 0.45f to Color.Transparent, 1f to Color.Transparent)
+private val SpotlightPillRim = Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.40f), Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.16f)))
+
+// 1.0.5: constant alpha mask for the spotlight artwork fade.
+private val SpotlightArtFadeMask = Brush.verticalGradient(0f to Color.Black, 0.55f to Color.Black, 1f to Color.Transparent)
+
 /** Round shortcut bubbles with a label and count underneath. */
 @Composable
 private fun SpotlightBubbles(d: HomeDims, liked: Int, downloads: Int, history: Int) {
@@ -369,9 +414,10 @@ private fun SpotlightBubbles(d: HomeDims, liked: Int, downloads: Int, history: I
     )
     val size = if (d.wide) 72.dp else 64.dp
     LazyRow(Modifier.staggerIn(0).padding(top = 8.dp), contentPadding = PaddingValues(horizontal = d.gutter, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        items(bubbles, key = { "bubble-" + it.label }) { b ->
+        items(bubbles, key = { "bubble-" + it.label }, contentType = { "bubble" }) { b -> // 1.0.5: contentType
             Column(Modifier.width(size + 12.dp).pressable(onClickLabel = b.label, pressedScale = 0.92f, onClick = b.go), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(size).clip(CircleShape).background(Brush.linearGradient(listOf(b.a, b.b))), contentAlignment = Alignment.Center) {
+                val bubbleBrush = remember(b.a, b.b) { Brush.linearGradient(listOf(b.a, b.b)) } // 1.0.5: remembered gradient
+                Box(Modifier.size(size).clip(CircleShape).background(bubbleBrush), contentAlignment = Alignment.Center) {
                     Icon(b.icon, null, Modifier.size(26.dp), tint = Color.White)
                 }
                 Spacer(Modifier.height(6.dp))
@@ -387,7 +433,8 @@ private fun SpotlightMoods(titles: List<String>, d: HomeDims, onSelect: (Int) ->
     var selected by remember { mutableStateOf(-1) }
     val c = MaterialTheme.colorScheme
     LazyRow(Modifier.padding(top = 10.dp), contentPadding = PaddingValues(horizontal = d.gutter, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        itemsIndexed(titles) { i, t ->
+        // 1.0.5: titles can repeat, so the key carries the position; contentType for reuse.
+        itemsIndexed(titles, key = { i, t -> "mood:$i:$t" }, contentType = { _, _ -> "mood-chip" }) { i, t ->
             val on = selected == i
             Box(Modifier.height(38.dp).clip(Ms.pill).background(if (on) c.primary else Color.Transparent)
                 .border(1.dp, if (on) c.primary else c.outlineVariant, Ms.pill)
@@ -467,8 +514,10 @@ private fun SpotlightRecentCards(tracks: List<Track>, d: HomeDims, index: Int) {
     val c = MaterialTheme.colorScheme
     val w = if (d.wide) 320.dp else 272.dp
     val h = 84.dp
+    val shown = remember(tracks) { tracks.take(20) }
     LazyRow(Modifier.staggerIn(index), contentPadding = PaddingValues(horizontal = d.gutter), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        itemsIndexed(tracks.take(20), key = { _, t -> "srp" + t.id }) { i, t ->
+        // 1.0.5: contentType; ids are unique (recent is distinctBy id), take(20) hoisted out of the LazyRow content.
+        itemsIndexed(shown, key = { _, t -> "srp" + t.id }, contentType = { _, _ -> "recent-card" }) { i, t ->
             Row(Modifier.width(w).height(h).clip(Ms.r20).background(c.surfaceContainerHigh)
                 .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }, verticalAlignment = Alignment.CenterVertically) {
                 Artwork(t.artUrl, Modifier.size(h), RectangleShape, t.title)

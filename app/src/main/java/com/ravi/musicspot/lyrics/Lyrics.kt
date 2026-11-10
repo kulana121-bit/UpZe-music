@@ -188,7 +188,16 @@ object LrcParser {
 }
 
 /** A stretch with no singing between two lines, long enough to show as an instrumental break. */
-data class LyricGap(val afterIndex: Int, val startMs: Long, val endMs: Long)
+data class LyricGap(val afterIndex: Int, val startMs: Long, val endMs: Long) {
+    /** 1.0.2: whether the song is inside this break at [positionMs]. */
+    operator fun contains(positionMs: Long) = positionMs in startMs until endMs
+    /** 1.0.2: 0 → 1 through the break (drives the waiting dots). */
+    fun progress(positionMs: Long): Float = ((positionMs - startMs).toFloat() / (endMs - startMs).coerceAtLeast(1)).coerceIn(0f, 1f)
+}
+
+/** 1.0.2: the intro before the first line as a break (afterIndex -1), when the singing starts 4 s or later. */
+fun List<LyricLine>.introGap(minMs: Long = 4_000L): LyricGap? =
+    firstOrNull()?.takeIf { it.startMs >= minMs }?.let { LyricGap(-1, minOf(600L, it.startMs / 4), it.startMs) }
 
 /**
  * When the singing in this line actually stops: the end of its last word, or
@@ -273,3 +282,4 @@ object TrackNameCleaner {
         return Cleaned(t.ifEmpty { title.trim() }, a.ifEmpty { artist.trim() })
     }
 }
+

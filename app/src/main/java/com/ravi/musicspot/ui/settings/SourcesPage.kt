@@ -60,7 +60,10 @@ fun SourcesPage() {
         SourceKind.LOCAL -> if (Graph.local.hasPermission()) "Files on this phone · native quality" else "Needs permission to read audio files"
         SourceKind.SUBSONIC -> accounts.firstOrNull { it.service == Account.Service.SUBSONIC }?.let { "${it.name} @ ${it.extra?.removePrefix("https://")}" } ?: "Needs a server (below)"
         SourceKind.JELLYFIN -> accounts.firstOrNull { it.service == Account.Service.JELLYFIN }?.let { "${it.name} @ ${it.extra?.substringBefore('|')?.removePrefix("https://")}" } ?: "Needs a server (below)"
-        SourceKind.SPOTIFY -> ""
+        SourceKind.NETEASE -> "Lossless FLAC (up to 24-bit) & 320 kbps MP3"
+        SourceKind.MONOCHROME -> "Tidal catalogue · FLAC 16-bit / 24-bit Hi-Res via mirror pool"
+        SourceKind.QOBUZ -> "Qobuz catalogue · FLAC up to 24-bit via proxy (experimental)"
+        SourceKind.SPOTIFY, SourceKind.RADIO -> ""
     }
 
     fun toggle(k: SourceKind, on: Boolean) {
@@ -69,7 +72,7 @@ fun SourcesPage() {
     }
 
     SettingsScaffold("Sources") {
-        item {
+        item(key = "sourcespage-1", contentType = "static") {
             Group("Priority", footer = "Long-press the handle and drag to reorder. A song plays from the highest source that has it (downloads always come first); if that fails, the next one is tried. With Max or Lossless quality the best-quality match wins.") {
                 ReorderList(order, onReorder = { l -> Graph.settings.update { it.copy(sourcePriority = l) } }, rowHeight = 68.dp, label = { it.label }) { k, index, handle ->
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -84,9 +87,9 @@ fun SourcesPage() {
                 }
             }
         }
-        item { SubsonicCard(accounts.firstOrNull { it.service == Account.Service.SUBSONIC }) }
-        item { JellyfinCard(accounts.firstOrNull { it.service == Account.Service.JELLYFIN }) }
-        item { JamendoCard(s.jamendoClientId) }
+        item(key = "sourcespage-2", contentType = "static") { SubsonicCard(accounts.firstOrNull { it.service == Account.Service.SUBSONIC }) }
+        item(key = "sourcespage-3", contentType = "static") { JellyfinCard(accounts.firstOrNull { it.service == Account.Service.JELLYFIN }) }
+        item(key = "sourcespage-4", contentType = "static") { JamendoCard(s.jamendoClientId) }
     }
 }
 

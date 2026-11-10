@@ -41,8 +41,28 @@ object NetEase {
         )
         val song = best(search, cleaned.title, durationMs, cleaned.artist) ?: return null
         val id = (song["id"] as? JsonPrimitive)?.longOrNull ?: return null
-        val lrc = lrcOf(get("$BASE/song/lyric".toHttpUrl().newBuilder().addQueryParameter("id", id.toString()).addQueryParameter("lv", "1").build()))
-            ?: return null
+        val lyricResp = get(
+            "$BASE/song/lyric".toHttpUrl().newBuilder()
+                .addQueryParameter("id", id.toString())
+                .addQueryParameter("lv", "1")
+                .addQueryParameter("kv", "1")
+                .addQueryParameter("tv", "1")
+                .addQueryParameter("yv", "1")
+                .build()
+        )
+
+        // 1. Try word-by-word YRC format first
+        val yrcText = (((lyricResp as? JsonObject)?.get("yrc") as? JsonObject)?.get("lyric") as? JsonPrimitive)?.contentOrNull
+        if (!yrcText.isNullOrBlank()) {
+            val yrcLines = KuGou.clean(YrcParser.parse(yrcText, durationMs), cleaned.title, cleaned.artist)
+            if (yrcLines.isNotEmpty()) {
+                val recordingMs = (song["duration"] as? JsonPrimitive)?.longOrNull ?: 0
+                return Lyrics.Synced(yrcLines, "NetEase", recordingMs = recordingMs)
+            }
+        }
+
+        // 2. Fall back to standard line-synced LRC
+        val lrc = lrcOf(lyricResp) ?: return null
         val lines = KuGou.clean(LrcParser.parse(lrc, durationMs), cleaned.title, cleaned.artist)
         val recordingMs = (song["duration"] as? JsonPrimitive)?.longOrNull ?: 0
         return if (lines.isEmpty()) null else Lyrics.Synced(lines, "NetEase", recordingMs = recordingMs)

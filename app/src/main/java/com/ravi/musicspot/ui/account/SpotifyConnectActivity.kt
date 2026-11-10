@@ -80,7 +80,7 @@ class SpotifyConnectActivity : ComponentActivity() {
     private var saving by mutableStateOf(false)
     private var unavailable by mutableStateOf(false)
     private var error by mutableStateOf<String?>(null)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + com.ravi.musicspot.core.BackgroundFaults)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,7 +124,7 @@ class SpotifyConnectActivity : ComponentActivity() {
                         val card = RoundedCornerShape(24.dp)
                         Box(Modifier.weight(1f).fillMaxWidth().padding(12.dp).clip(card).background(Color.White)) {
                             val f = frame
-                            if (f != null && !unavailable) AndroidView(factory = { f }, modifier = Modifier.fillMaxSize())
+                            if (f != null && !unavailable) AndroidView(factory = { (f.parent as? ViewGroup)?.removeView(f); f }, modifier = Modifier.fillMaxSize()) // 1.0.7: a re-attached frame threw "child already has a parent"
                             else Text("This phone's web view isn't working, so Spotify's sign-in page can't open. Update Android System WebView in the Play Store and try again.",
                                 textAlign = TextAlign.Center, color = scheme.onSurface, modifier = Modifier.fillMaxSize().background(scheme.surfaceContainer).padding(32.dp))
                             if (loading && !saving) LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp), color = SpotifyGreen, trackColor = Color.Transparent)
@@ -211,16 +211,18 @@ class SpotifyConnectActivity : ComponentActivity() {
         error = null
         scope.launch {
             val r = runCatching { Sessions.signInSpotify(spDc) }
+            if (isFinishing || isDestroyed) return@launch // 1.0.7: the user left while the token was checked
             r.onSuccess { name ->
                 Pills.show(if (name != null) "Spotify connected as $name · importing" else "Spotify connected · importing")
-                wipeWebData(this@SpotifyConnectActivity, web) { }
+                // 1.0.7: close first, wipe after: the wipe's callback used to touch a WebView already destroyed.
                 setResult(Activity.RESULT_OK)
+                wipeWebData(applicationContext, null) { }
                 finish()
             }.onFailure {
                 saving = false
                 done = false
                 // Start over from a clean jar so the same rejected cookie isn't picked up again.
-                wipeWebData(this@SpotifyConnectActivity, web) { web?.post { web?.loadUrl(LOGIN) } }
+                wipeWebData(this@SpotifyConnectActivity, web) { if (!isDestroyed) web?.post { if (!isDestroyed) web?.loadUrl(LOGIN) } }
                 error = "Spotify didn't accept that sign-in (${it.message ?: "unknown error"}). Try again."
             }
         }

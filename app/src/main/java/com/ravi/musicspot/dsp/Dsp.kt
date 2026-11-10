@@ -60,12 +60,20 @@ object BiquadDesign {
 }
 
 /** Transposed direct form II biquad with per-channel Float64 state. */
-class Biquad(channels: Int, var c: Coefs = Coefs.IDENTITY) {
+class Biquad(channels: Int, c: Coefs = Coefs.IDENTITY) {
     private val z1 = DoubleArray(channels); private val z2 = DoubleArray(channels)
+    // 1.0.5: coefficients mirrored into primitive fields so process() does no getter/indirection per sample.
+    // Same doubles, same expression order -> bit-identical output.
+    private var b0 = 1.0; private var b1 = 0.0; private var b2 = 0.0; private var a1 = 0.0; private var a2 = 0.0
+    var c: Coefs = c
+        set(v) { field = v; b0 = v.b0; b1 = v.b1; b2 = v.b2; a1 = v.a1; a2 = v.a2 }
+
+    init { this.c = c }
+
     fun process(x: Double, ch: Int): Double {
-        val y = c.b0 * x + z1[ch]
-        z1[ch] = c.b1 * x - c.a1 * y + z2[ch]
-        z2[ch] = c.b2 * x - c.a2 * y
+        val y = b0 * x + z1[ch]
+        z1[ch] = b1 * x - a1 * y + z2[ch]
+        z2[ch] = b2 * x - a2 * y
         return y
     }
     fun reset() { z1.fill(0.0); z2.fill(0.0) }
@@ -121,18 +129,27 @@ data class EqConfig(
 
 /** One complete EQ chain for a fixed config and sample rate. */
 class EqChain(val config: EqConfig, private val fs: Double, private val channels: Int) {
-    private val filters = config.designs(fs).map { Biquad(channels, it) }
+    // 1.0.5: Array instead of List -> the per-sample filter loop is an indexed loop (the old `for (f in filters)` allocated
+    // an Iterator per channel per frame on the audio thread). Construction (designs + auto-headroom scan) is heavy and is
+    // now done off the audio thread by EngineCore.update().
+    private val filters: Array<Biquad> = config.designs(fs).let { ds -> Array(ds.size) { Biquad(channels, ds[it]) } }
+    private val nFilters = filters.size
     private val gain = 10.0.pow(config.effectivePreampDb(fs) / 20)
     private val sideGain = 1 + config.widen * 0.5
+    private val widenOn = channels == 2 && config.widen > 0
 
     /** Processes one interleaved frame in place (Float64 working buffer). */
     fun frame(buf: DoubleArray) {
-        for (ch in 0 until channels) {
+        val fl = filters
+        var ch = 0
+        while (ch < channels) {
             var x = buf[ch] * gain
-            for (f in filters) x = f.process(x, ch)
+            var i = 0
+            while (i < nFilters) { x = fl[i].process(x, ch); i++ }
             buf[ch] = x
+            ch++
         }
-        if (channels == 2 && config.widen > 0) {
+        if (widenOn) {
             val m = (buf[0] + buf[1]) * 0.5; val s = (buf[0] - buf[1]) * 0.5 * sideGain
             buf[0] = m + s; buf[1] = m - s
         }
@@ -143,14 +160,14 @@ class EqChain(val config: EqConfig, private val fs: Double, private val channels
 class Limiter(private val fs: Double, private val ceiling: Double = 10.0.pow(-0.3 / 20), releaseMs: Double = 60.0) {
     private var g = 1.0
     private val rel = exp(-1.0 / (fs * releaseMs / 1000))
-    var reductionDb = 0.0; private set
+    // 1.0.5: derived on read (status poll, ~2 Hz) instead of a log10() per output frame. Same value: 20·log10(g) of the last g.
+    val reductionDb: Double get() = 20 * log10(g)
     fun frame(buf: DoubleArray, channels: Int) {
         var peak = 0.0
         for (ch in 0 until channels) peak = max(peak, abs(buf[ch]))
         val target = if (peak * g > ceiling) ceiling / peak else min(1.0, if (peak > 0) ceiling / peak else 1.0)
         g = if (target < g) target else target + (g - target) * rel
         for (ch in 0 until channels) buf[ch] = (buf[ch] * g).coerceIn(-ceiling, ceiling)
-        reductionDb = 20 * log10(g)
     }
 }
 
@@ -160,42 +177,53 @@ class Limiter(private val fs: Double, private val ceiling: Double = 10.0.pow(-0.
  * cutoff) is high-passed at the cutoff and mixed in at Light/Strong level. It does not recover lost data.
  */
 class BandwidthExtender(private val fs: Double, private val channels: Int, private val level: Double) {
-    private val probes = doubleArrayOf(11_000.0, 14_000.0, 15_500.0, 16_500.0, 17_500.0, 19_000.0).filter { it < fs * 0.45 }
-    private val bands = probes.map { f -> Biquad(1, BiquadDesign.design(FilterType.PEAK, fs, f, 8.0, 0.0)).also { it.c = bandPass(f) } }
+    // 1.0.5: primitive arrays instead of List<Double>/List<Biquad>; no ranges/lambdas/boxing in frame().
+    private val probes: DoubleArray = PROBE_FREQS.filter { it < fs * 0.45 }.toDoubleArray()
+    private val bands: Array<Biquad> = Array(probes.size) { Biquad(1, bandPass(probes[it])) }
     private val energy = DoubleArray(probes.size)
     var cutoffHz: Double = fs / 2; private set
-    private var srcHp = Array(channels) { Biquad(1) }
-    private var outHp1 = Array(channels) { Biquad(1) }
-    private var outHp2 = Array(channels) { Biquad(1) }
+    private val srcHp = Array(channels) { Biquad(1) }
+    private val outHp1 = Array(channels) { Biquad(1) }
+    private val outHp2 = Array(channels) { Biquad(1) }
     private var counter = 0
     private var active = false
+
+    // 1.0.5: the detector can only ever pick fs/2 (index 0) or the midpoint between probes i-1 and i (index i), so every
+    // retune target and its filter designs are computed once here; retune() just swaps references (no allocation).
+    private val cuts = DoubleArray(max(1, probes.size)) { i -> if (i == 0) fs / 2 else (probes[i - 1] + probes[i]) / 2 }
+    private val srcCoefs = Array(cuts.size) { BiquadDesign.design(FilterType.HIGH_PASS, fs, cuts[it] * 0.55, 0.707, 0.0) }
+    private val outCoefs = Array(cuts.size) { BiquadDesign.design(FilterType.HIGH_PASS, fs, cuts[it], 0.707, 0.0) }
 
     private fun bandPass(f: Double): Coefs {
         val w0 = 2 * PI * f / fs; val alpha = sin(w0) / (2 * 6.0); val a0 = 1 + alpha
         return Coefs(alpha / a0, 0.0, -alpha / a0, -2 * cos(w0) / a0, (1 - alpha) / a0)
     }
 
-    private fun retune(cut: Double) {
+    private fun retune(idx: Int) {
+        val cut = cuts[idx]
         cutoffHz = cut
         active = cut < min(19_500.0, fs * 0.44)
-        srcHp.forEach { it.c = BiquadDesign.design(FilterType.HIGH_PASS, fs, cut * 0.55, 0.707, 0.0) }
-        outHp1.forEach { it.c = BiquadDesign.design(FilterType.HIGH_PASS, fs, cut, 0.707, 0.0) }
-        outHp2.forEach { it.c = BiquadDesign.design(FilterType.HIGH_PASS, fs, cut, 0.707, 0.0) }
+        val sc = srcCoefs[idx]; val oc = outCoefs[idx]
+        for (ch in 0 until channels) { srcHp[ch].c = sc; outHp1[ch].c = oc; outHp2[ch].c = oc }
     }
 
-    init { retune(fs / 2) }
+    init { retune(0) }
 
     fun frame(buf: DoubleArray) {
-        val mono = (0 until channels).sumOf { buf[it] } / channels
-        for (i in bands.indices) { val y = bands[i].process(mono, 0); energy[i] = energy[i] * 0.9995 + y * y * 0.0005 }
+        var sum = 0.0
+        for (ch in 0 until channels) sum += buf[ch]
+        val mono = sum / channels
+        for (i in 0 until bands.size) { val y = bands[i].process(mono, 0); energy[i] = energy[i] * 0.9995 + y * y * 0.0005 }
         if (++counter >= 4096) {
             counter = 0
-            val ref = energy.firstOrNull() ?: 0.0
+            val ref = if (energy.isNotEmpty()) energy[0] else 0.0
             if (ref > 1e-9) {
                 // First probe band that sits 35 dB under the 11 kHz reference marks the codec's low-pass.
-                val idx = (1 until energy.size).firstOrNull { energy[it] < ref * 10.0.pow(-3.5) }
-                val cut = idx?.let { (probes[it - 1] + probes[it]) / 2 } ?: fs / 2
-                if (abs(cut - cutoffHz) > 300) retune(cut)
+                val thr = ref * DROP_35DB
+                var idx = 0
+                var i = 1
+                while (i < energy.size) { if (energy[i] < thr) { idx = i; break }; i++ }
+                if (abs(cuts[idx] - cutoffHz) > 300) retune(idx)
             }
         }
         if (!active || level <= 0) return
@@ -204,6 +232,11 @@ class BandwidthExtender(private val fs: Double, private val channels: Int, priva
             val harm = band * abs(band) * 4.0 // even-order harmonics, rises with level like real content
             buf[ch] += outHp2[ch].process(outHp1[ch].process(harm, 0), 0) * level
         }
+    }
+
+    private companion object {
+        val PROBE_FREQS = doubleArrayOf(11_000.0, 14_000.0, 15_500.0, 16_500.0, 17_500.0, 19_000.0)
+        val DROP_35DB = 10.0.pow(-3.5)
     }
 }
 
@@ -237,7 +270,18 @@ class TpdfDither(seed: Long = 0x5EED) {
  */
 class Resampler(val inRate: Int, val outRate: Int, private val channels: Int, private val taps: Int = 64) {
     private val l: Int; private val m: Int
+    /**
+     * 1.0.5: rows of the prototype table. Equals [l] (exact polyphase, unchanged maths) whenever l <= MAX_EXACT_PHASES,
+     * which covers every standard rate pair (44.1k→48k l=160, 44.1k→96k l=320, 11.025k→192k l=2560, …). For odd rates
+     * (e.g. 44101→48000 gives l=48000 → a 3.07 M-tap prototype ≈ 37 MB, ≈ 74 MB to 96 kHz) the table is capped at
+     * INTERP_PHASES rows and the coefficients for the exact rational phase are linearly interpolated between rows.
+     * Output length/timing stays exact (same integer phase stepping); only those odd rates differ, by << 1 LSB of 16-bit.
+     */
+    private val phases: Int
+    private val interpolated: Boolean
     private val poly: Array<FloatArray>
+    /** 1.0.5: per-output interpolated coefficient row (interpolated mode only); preallocated, reused. */
+    private val coefScratch: FloatArray
     /** Per-channel input not yet fully consumed; index 0 is absolute sample [start]. Pre-filled with taps-1 zeros. */
     private var buf: Array<FloatArray>
     private var len = 0
@@ -248,19 +292,26 @@ class Resampler(val inRate: Int, val outRate: Int, private val channels: Int, pr
 
     init {
         val g = gcd(inRate, outRate); l = outRate / g; m = inRate / g
-        val total = l * taps
-        val cutoff = 0.5 * min(1.0, l.toDouble() / m) * 0.93 / l // normalised to the L·fsIn rate
+        interpolated = l > MAX_EXACT_PHASES
+        phases = if (interpolated) INTERP_PHASES else l
+        val total = phases * taps
+        val cutoff = 0.5 * min(1.0, l.toDouble() / m) * 0.93 / phases // normalised to the phases·fsIn rate
         val beta = 10.0
         val i0b = besselI0(beta)
-        val center = (total - 1) / 2.0
+        // 1.0.5: on the interpolated table the centre is shifted so row r = phase·P/l sits at exactly the same fractional
+        // time as exact phase `phase` would (exact path: unchanged expression).
+        val center = if (interpolated) (total - phases.toDouble() / l) / 2.0 else (total - 1) / 2.0
         val proto = DoubleArray(total) { n ->
             val t = n - center
             val sinc = if (abs(t) < 1e-9) 2 * cutoff else sin(2 * PI * cutoff * t) / (PI * t)
             val r = t / (total / 2.0)
             val w = if (abs(r) >= 1) 0.0 else besselI0(beta * sqrt(1 - r * r)) / i0b
-            sinc * w * l
+            sinc * w * phases
         }
-        poly = Array(l) { ph -> FloatArray(taps) { k -> proto[ph + k * l].toFloat() } }
+        poly = if (!interpolated) Array(l) { ph -> FloatArray(taps) { k -> proto[ph + k * l].toFloat() } }
+        // One extra guard row (row P == row 0 advanced by one tap) so phase i0+1 is always valid.
+        else Array(phases + 1) { ph -> FloatArray(taps) { k -> val idx = ph + k * phases; if (idx < total) proto[idx].toFloat() else 0f } }
+        coefScratch = FloatArray(if (interpolated) taps else 0)
         buf = Array(channels) { FloatArray(taps * 4 + 4096) }
         len = taps - 1; start = -(taps - 1).toLong(); n0 = 0
     }
@@ -280,7 +331,15 @@ class Resampler(val inRate: Int, val outRate: Int, private val channels: Int, pr
         var written = 0
         val end = start + len
         while (n0 < end) {
-            val coefs = poly[phase]
+            val coefs: FloatArray
+            if (interpolated) {
+                // 1.0.5: exact rational phase/l mapped onto the capped table, linear interpolation between adjacent rows.
+                val pos = phase.toDouble() * phases / l
+                val i0 = pos.toInt(); val t = (pos - i0).toFloat()
+                val c0 = poly[i0]; val c1 = poly[i0 + 1]; val cs = coefScratch
+                for (k in 0 until taps) cs[k] = c0[k] + (c1[k] - c0[k]) * t
+                coefs = cs
+            } else coefs = poly[phase]
             val newest = (n0 - start).toInt()
             for (ch in 0 until channels) {
                 val b = buf[ch]; var acc = 0.0f
@@ -302,6 +361,10 @@ class Resampler(val inRate: Int, val outRate: Int, private val channels: Int, pr
     }
 
     companion object {
+        /** 1.0.5: largest exact polyphase table (4096 × 64 taps ≈ 1 MB floats + 2 MB transient prototype). */
+        const val MAX_EXACT_PHASES = 4096
+        /** 1.0.5: table rows used when the exact L would exceed [MAX_EXACT_PHASES]. */
+        const val INTERP_PHASES = 2048
         fun gcd(a: Int, b: Int): Int = if (b == 0) a else gcd(b, a % b)
         fun besselI0(x: Double): Double {
             var sum = 1.0; var term = 1.0; val q = x * x / 4

@@ -2,5 +2,5 @@
 <resources>
     <color name="canvas">#FF141317</color>
     <color name="accent">#FFE7A9B0</color>
-    <color name="ic_launcher_background">#FFFDF2F4</color>
+    <color name="ic_launcher_background">#FF000000</color>
 </resources>

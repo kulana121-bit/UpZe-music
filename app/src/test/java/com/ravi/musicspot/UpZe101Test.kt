@@ -8,6 +8,7 @@ import com.ravi.musicspot.ui.player.inPlayer
 import com.ravi.musicspot.ui.player.isFull
 import com.ravi.musicspot.ui.player.isSwipeUp
 import com.ravi.musicspot.ui.player.shouldDismissPane
+import com.ravi.musicspot.ui.player.shouldOpenPane
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -18,9 +19,9 @@ import org.junit.Test
 class UpZe101Test {
     @Test fun fullPanesAreQueueAndLyricsOnly() {
         assertTrue(Pane.QUEUE.isFull()); assertTrue(Pane.LYRICS.isFull())
-        assertFalse(Pane.RELATED.isFull()); assertFalse(Pane.CREDITS.isFull()); assertFalse((null as Pane?).isFull())
+        assertTrue(Pane.RELATED.isFull()); assertFalse(Pane.CREDITS.isFull()); assertFalse((null as Pane?).isFull())
         assertNull(Pane.QUEUE.inPlayer()); assertNull(Pane.LYRICS.inPlayer())
-        assertEquals(Pane.RELATED, Pane.RELATED.inPlayer()); assertEquals(Pane.CREDITS, Pane.CREDITS.inPlayer())
+        assertNull(Pane.RELATED.inPlayer()); assertEquals(Pane.CREDITS, Pane.CREDITS.inPlayer())
     }
 
     @Test fun swipeUpNeedsDistanceOrFling() {
@@ -30,6 +31,14 @@ class UpZe101Test {
         assertFalse(isSwipeUp(-20f, -3000f, dist, fling))      // a twitch is not a swipe
         assertFalse(isSwipeUp(-100f, -500f, dist, fling))      // slow and short
         assertFalse(isSwipeUp(300f, 3000f, dist, fling))       // downward = collapse, never the pane
+    }
+
+    @Test fun interactiveSwipeUpOpensPastThresholdOrOnFlick() {
+        val dist = 150f; val fling = 2400f
+        assertTrue(shouldOpenPane(0.4f, -400f, 0f, dist, fling))      // dragged past a third, let go
+        assertFalse(shouldOpenPane(0.2f, -100f, -500f, dist, fling))  // short and slow: falls back
+        assertTrue(shouldOpenPane(0.05f, -60f, -3000f, dist, fling))  // short fast flick up
+        assertFalse(shouldOpenPane(0.6f, -600f, 3000f, dist, fling))  // flung back down: cancels even past the threshold
     }
 
     @Test fun paneDismissByDistanceOrFling() {

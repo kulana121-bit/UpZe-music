@@ -58,15 +58,32 @@ object KuGou {
             ?: return null
         val id = hit.str("id") ?: return null
         val key = hit.str("accesskey") ?: return null
-        val download = "$BASE/download".toHttpUrl().newBuilder()
+        fun dl(fmt: String) = "$BASE/download".toHttpUrl().newBuilder()
             .addQueryParameter("ver", "1")
             .addQueryParameter("client", "pc")
             .addQueryParameter("id", id)
             .addQueryParameter("accesskey", key)
-            .addQueryParameter("fmt", "lrc")
+            .addQueryParameter("fmt", fmt)
             .addQueryParameter("charset", "utf8")
             .build()
-        val lrc = lrcOf(get(download)) ?: return null
+
+        // 1. Try word-by-word KRC format first
+        val krcRaw = (runCatching { get(dl("krc")) }.getOrNull() as? JsonObject)?.str("content")?.takeIf { it.isNotBlank() }
+        if (krcRaw != null) {
+            val bytes = runCatching { Base64.getDecoder().decode(krcRaw) }.getOrNull()
+            if (bytes != null) {
+                val decrypted = KrcDecryptor.decrypt(bytes)
+                if (!decrypted.isNullOrBlank()) {
+                    val krcLines = clean(KrcParser.parse(decrypted, durationMs), cleaned.title, cleaned.artist)
+                    if (krcLines.isNotEmpty()) {
+                        return Lyrics.Synced(krcLines, "KuGou", recordingMs = hit.num("duration")?.toLong() ?: 0)
+                    }
+                }
+            }
+        }
+
+        // 2. Fall back to standard line-synced LRC
+        val lrc = lrcOf(get(dl("lrc"))) ?: return null
         val lines = clean(LrcParser.parse(lrc, durationMs), cleaned.title, cleaned.artist)
         return if (lines.isEmpty()) null else Lyrics.Synced(lines, "KuGou", recordingMs = hit.num("duration")?.toLong() ?: 0)
     }

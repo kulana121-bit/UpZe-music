@@ -23,6 +23,8 @@ object UpdateLogic {
         val apkName: String,
         val apkSize: Long,
         val pageUrl: String?,
+        /** 1.0.7: GitHub's asset digest ("sha256:<hex>"), lower-case hex only; null on older releases. */
+        val apkSha256: String? = null,
     )
 
     /** A semantic version: numeric core plus an optional pre-release ("1.2.0-beta.1"); build metadata is ignored. */
@@ -67,6 +69,20 @@ object UpdateLogic {
         return r > c
     }
 
+    /**
+     * 1.0.7: is the release's APK the build that is already installed? The tag alone can't say: v1.01 on GitHub was
+     * published with versionName "v1", so the app compared "1.01" with "1" forever and offered the update again after
+     * every install. Same SHA-256 (GitHub's asset digest) means the same file; without a digest an identical byte size
+     * is used (a signed APK of another build practically never has the exact same size).
+     */
+    fun isInstalledBuild(rel: Release, installedSha256: String?, installedSize: Long): Boolean = when {
+        rel.apkSha256 != null && installedSha256 != null -> rel.apkSha256.equals(installedSha256, ignoreCase = true)
+        else -> rel.apkSize > 0 && rel.apkSize == installedSize
+    }
+
+    /** 1.0.7: a downloaded APK is only an update when its versionCode is higher than the installed one. */
+    fun isUpgrade(downloadedCode: Long?, installedCode: Long): Boolean = downloadedCode == null || downloadedCode > installedCode
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /**
@@ -90,6 +106,7 @@ object UpdateLogic {
             apkUrl = url, apkName = asset.str("name")!!,
             apkSize = (asset["size"] as? JsonPrimitive)?.longOrNull ?: -1L,
             pageUrl = o.str("html_url"),
+            apkSha256 = asset.str("digest")?.takeIf { it.startsWith("sha256:", ignoreCase = true) }?.substringAfter(':')?.lowercase()?.takeIf { it.length == 64 },
         )
     }
 

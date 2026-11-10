@@ -4,6 +4,7 @@
  */
 package com.ravi.musicspot.ui
 
+import androidx.compose.material.icons.rounded.Groups
 import android.content.Intent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
@@ -27,7 +28,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -94,6 +98,12 @@ object Menus {
     var track by mutableStateOf<Track?>(null)
     var addToPlaylist by mutableStateOf<List<Track>?>(null)
     var credits by mutableStateOf<Track?>(null)
+    /** 1.0.2: set (to the entry's time) when the song menu was opened from History, so it can offer "Remove from history". */
+    var historyAt by mutableStateOf<Long?>(null)
+    /** 1.0.2: set when the song menu was opened inside one of the user's own playlists ("Remove from playlist"). */
+    var playlistId by mutableStateOf<String?>(null)
+    /** 1.0.2: set when the song menu was opened from Cached songs ("Remove from cache"). */
+    var cachedId by mutableStateOf<String?>(null)
 }
 
 @Composable
@@ -130,19 +140,27 @@ fun PillHost() {
  * over a fading scrim and slides back down when closed (any action, back, scrim tap or drag down).
  */
 @Composable
-fun TrackMenuSheet(nav: Navigator, onOpenPlayerClose: () -> Unit) = com.ravi.musicspot.ui.motion.MotionSheet(Menus.track, onDismiss = { Menus.track = null }) { t ->
+fun TrackMenuSheet(nav: Navigator, onOpenPlayerClose: () -> Unit) = com.ravi.musicspot.ui.motion.MotionSheet(Menus.track, onDismiss = { Menus.track = null; Menus.historyAt = null; Menus.playlistId = null; Menus.cachedId = null }) { t ->
     val ctx = LocalContext.current
     val lib by Graph.library.data.collectAsState()
     val dls by Graph.downloads.items.collectAsState()
     val liked = lib.liked.any { it.id == t.id }
-    fun close() { Menus.track = null }
+    // 1.0.2: "Play next" makes no sense for the song that is already playing (the player's ⋮), so it is hidden then.
+    val playerState by Graph.player.state.collectAsState()
+    val isCurrent = playerState.current?.id == t.id
+    val historyAt = Menus.historyAt
+    val inPlaylist = Menus.playlistId
+    val fromCache = Menus.cachedId
+    val roomNow by com.ravi.musicspot.together.ListenTogether.room.collectAsState()
+    val inRoomAsListener = roomNow?.role == com.ravi.musicspot.together.ListenTogether.Role.LISTENER && !t.source.isLive
+    fun close() { Menus.track = null; Menus.historyAt = null; Menus.playlistId = null; Menus.cachedId = null }
     val stagger = remember(t.id) { java.util.concurrent.atomic.AtomicInteger(0) }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onSurface, LocalMenuStagger provides stagger) {
         // v2.0.10 iOS-style focus: the chosen song lifts out as its own floating "cutout" card (pops in on a soft
         // spring with a deep shadow) over the blurred app, with the options sheet below it.
         val stillCut = com.ravi.musicspot.ui.motion.reducedMotion()
         val lift = remember(t.id) { Animatable(if (stillCut) 1f else 0f) }
-        androidx.compose.runtime.LaunchedEffect(t.id) { if (!stillCut) lift.animateTo(1f, spring(dampingRatio = 0.68f, stiffness = 180f)) }
+        androidx.compose.runtime.LaunchedEffect(t.id) { if (!stillCut) lift.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 380f)) } // 1.0.8: was 180
         Row(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp).fillMaxWidth()
             .graphicsLayer { val v = lift.value; scaleX = 0.9f + 0.1f * v; scaleY = scaleX; alpha = v.coerceIn(0f, 1f); translationY = (1f - v) * 40.dp.toPx()
                 shadowElevation = 28.dp.toPx() * v; shape = Ms.r28; clip = false }
@@ -155,7 +173,32 @@ fun TrackMenuSheet(nav: Navigator, onOpenPlayerClose: () -> Unit) = com.ravi.mus
             }
         }
         Column(Modifier.glassSheet(Ms.r28).navigationBarsPadding().padding(top = 8.dp, bottom = 8.dp)) {
-            MenuRow(Icons.Rounded.SkipNext, "Play next") { Graph.player.playNext(t); Pills.show("Plays next"); close() }
+            if (fromCache != null) MenuRow(Icons.Rounded.Delete, "Remove from cache") { Graph.cached.remove(fromCache); Pills.show("Removed from cache"); close() }
+            if (inRoomAsListener) MenuRow(Icons.Rounded.Groups, "Send to the room") { com.ravi.musicspot.together.ListenTogether.suggest(t); close() }
+            if (inPlaylist != null) MenuRow(Icons.Rounded.Delete, "Remove from playlist") { Graph.library.removeFromPlaylist(inPlaylist, t.id); Pills.show("Removed from playlist"); close() }
+            if (historyAt != null) MenuRow(Icons.Rounded.Delete, "Remove from history") { Graph.library.removeHistory(t.id, historyAt); Pills.show("Removed from history"); close() }
+            if (!isCurrent) MenuRow(Icons.Rounded.SkipNext, "Play next") { Graph.player.playNext(t); Pills.show("Plays next"); close() }
+            // 1.0.2: the playing song's menu (player ⋮) can cast/switch output and pin the song to the home screen.
+            if (isCurrent) {
+                // 1.0.8: switch Now Playing between the normal artwork and Live lyrics (kinetic, beat-reactive lyrics).
+                val liveOn = Graph.settings.state.collectAsState().value.liveLyrics
+                MenuRow(if (liveOn) Icons.Rounded.Album else Icons.Rounded.AutoAwesome, if (liveOn) "Turn off Motion Lyrics" else "Motion Lyrics") {
+                    Graph.settings.update { it.copy(liveLyrics = !it.liveLyrics) }
+                    Pills.show(if (liveOn) "Motion Lyrics off" else "Motion Lyrics on. Lyrics dance over the artwork")
+                    close()
+                }
+                MenuRow(Icons.Rounded.Cast, "Cast / play on another device") {
+                    if (!com.ravi.musicspot.core.TrackShortcuts.openOutputPicker(ctx)) Pills.show("No cast or output picker on this phone"); close()
+                }
+                if (com.ravi.musicspot.core.TrackShortcuts.supported(ctx)) MenuRow(Icons.Rounded.PushPin, "Pin to home screen") {
+                    val app = ctx.applicationContext
+                    com.ravi.musicspot.core.IoScope.launch {
+                        val ok = com.ravi.musicspot.core.TrackShortcuts.pin(app, t)
+                        Pills.show(if (ok) "Pinned. Confirm on your home screen if asked" else "Your launcher doesn't allow pinning")
+                    }
+                    close()
+                }
+            }
             MenuRow(Icons.AutoMirrored.Rounded.QueueMusic, "Add to queue") { Graph.player.addToQueue(listOf(t)); Pills.show("Added to queue"); close() }
             MenuRow(if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, if (liked) "Remove from Liked" else "Like") {
                 Graph.library.setLiked(t, !liked); Pills.show(if (liked) "Removed from Liked" else "Added to Liked"); close()
@@ -166,7 +209,7 @@ fun TrackMenuSheet(nav: Navigator, onOpenPlayerClose: () -> Unit) = com.ravi.mus
             }
             val dl = dls[t.id]
             if (dl?.state == com.ravi.musicspot.data.DownloadEntry.State.DONE) MenuRow(Icons.Rounded.Delete, "Remove download") { Graph.downloads.delete(t.id); close() }
-            else if (t.source != SourceKind.LOCAL) MenuRow(Icons.Rounded.Download, if (dl != null) "Downloading…" else "Download") {
+            else if (t.source != SourceKind.LOCAL && !t.source.isLive) MenuRow(Icons.Rounded.Download, if (dl != null) "Downloading…" else "Download") {
                 if (dl == null) { Graph.downloads.enqueue(t, Graph.settings.value.wifiOnlyDownloads); Pills.show("Download started") }; close()
             }
             t.artistId?.let { aid -> MenuRow(Icons.Rounded.Person, "Go to artist") { onOpenPlayerClose(); nav.push(Route.Artist(aid, t.artist)); close() } }
@@ -177,6 +220,9 @@ fun TrackMenuSheet(nav: Navigator, onOpenPlayerClose: () -> Unit) = com.ravi.mus
                 val link = when (t.source) {
                     SourceKind.YOUTUBE -> "https://music.youtube.com/watch?v=${t.nativeId}"
                     SourceKind.SPOTIFY -> "https://open.spotify.com/track/${t.nativeId}"
+                    SourceKind.NETEASE -> "https://music.163.com/#/song?id=${t.nativeId}"
+                    SourceKind.MONOCHROME -> "https://tidal.com/browse/track/${t.nativeId}"
+                    SourceKind.QOBUZ -> "https://open.qobuz.com/track/${t.nativeId}"
                     SourceKind.SOUNDCLOUD -> t.nativeId
                     else -> null
                 }
@@ -197,7 +243,7 @@ fun MenuRow(icon: ImageVector, label: String, onClick: () -> Unit) {
     val idx = remember { counter?.getAndIncrement() ?: -1 }
     val still = com.ravi.musicspot.ui.motion.reducedMotion()
     val a = remember { Animatable(if (idx < 0 || still) 1f else 0f) }
-    androidx.compose.runtime.LaunchedEffect(Unit) { if (a.value < 1f) { kotlinx.coroutines.delay(40L + 35L * idx); a.animateTo(1f, spring(dampingRatio = 0.78f, stiffness = 133f)) } }
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (a.value < 1f) { kotlinx.coroutines.delay(20L + 20L * idx); a.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 320f)) } } // 1.0.8: was 40+35/row, stiffness 133
     Row(Modifier.fillMaxWidth().graphicsLayer { val v = a.value; alpha = v.coerceIn(0f, 1f); translationY = (1f - v) * 28.dp.toPx(); scaleX = 0.94f + 0.06f * v; scaleY = scaleX }
         .clickable(onClick = onClick).heightIn(min = 52.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -216,9 +262,9 @@ fun AddToPlaylistDialog() = com.ravi.musicspot.ui.motion.MotionDialog(Menus.addT
         text = {
             Column {
                 OutlinedTextField(newName, { newName = it }, label = { Text("New playlist name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                val own = lib.playlists.filter { !it.isSynced }
+                val own = lib.playlists.filter { !it.isSynced }.distinctBy { it.id } // 1.0.7: keyed list
                 if (own.isNotEmpty()) LazyColumn(Modifier.heightIn(max = 280.dp).padding(top = 8.dp)) {
-                    items(own, key = { it.id }) { p ->
+                    items(own, key = { it.id }, contentType = { "playlist" }) { p ->
                         Row(Modifier.fillMaxWidth().clickable {
                             tracks.forEach { Graph.library.addToPlaylist(p.id, it) }; Pills.show("Added to ${p.name}"); Menus.addToPlaylist = null
                         }.padding(vertical = 12.dp)) { Text(p.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) }

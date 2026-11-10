@@ -40,6 +40,7 @@ import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
+import coil3.request.bitmapConfig
 import com.ravi.musicspot.logic.Contrast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -126,6 +127,55 @@ fun softScheme(seed: Color?, dark: Boolean = true, pureBlack: Boolean = false): 
     )
 }
 
+/**
+ * 1.0.7: the dynamic scheme built from the artwork's scored colours ([ArtTheme]). Starts from [softScheme] (so every
+ * role exists and is checked) and replaces the roles that carry the art's colour: primary + container, the four
+ * surfaces, secondary text and outlines, each re-checked for contrast. Null [p] = the default scheme.
+ */
+fun artScheme(p: com.ravi.musicspot.logic.ArtTheme.Picked?, dark: Boolean, pureBlack: Boolean): ColorScheme {
+    if (p == null) return softScheme(null, dark, pureBlack)
+    val base = softScheme(Color(p.accent), dark, pureBlack)
+    val t = com.ravi.musicspot.logic.ArtTheme.tones(p, dark, pureBlack)
+    val bg = Color(t.bg); val s1 = Color(t.s1); val s2 = Color(t.s2); val s3 = Color(t.s3)
+    val primary = readable(Color(t.accent), s3, 4.5)
+    val onPrimary = readable(if (dark) Color(0xFF101014) else Color.White, primary, 4.5)
+    val text = readable(base.onBackground, s3, 7.0)
+    val text2 = readable(Color(t.textVariant), s3, 4.5)
+    val pc = Color(t.container)
+    return base.copy(
+        primary = primary, onPrimary = onPrimary, primaryContainer = pc, onPrimaryContainer = readable(primary, pc, 4.5),
+        surfaceTint = primary, background = bg, surface = bg, onBackground = text, onSurface = text,
+        surfaceVariant = s2, onSurfaceVariant = text2, secondary = text2, secondaryContainer = s3, onSecondaryContainer = text,
+        surfaceBright = if (dark) s3 else bg, surfaceDim = if (dark) bg else s3,
+        surfaceContainerLowest = if (dark) bg else Color.White, surfaceContainerLow = s1, surfaceContainer = s1,
+        surfaceContainerHigh = s2, surfaceContainerHighest = s3,
+        outlineVariant = Color(t.outlineVariant), inverseSurface = text, inverseOnSurface = bg,
+    )
+}
+
+/** 1.0.7: every colour role of [a]→[b] at [f] (the whole scheme glides on a song change, not just five roles). */
+fun lerpScheme(a: ColorScheme, b: ColorScheme, f: Float): ColorScheme {
+    if (f >= 1f) return b
+    if (f <= 0f) return a
+    fun l(x: Color, y: Color) = lerp(x, y, f)
+    return b.copy(
+        primary = l(a.primary, b.primary), onPrimary = l(a.onPrimary, b.onPrimary),
+        primaryContainer = l(a.primaryContainer, b.primaryContainer), onPrimaryContainer = l(a.onPrimaryContainer, b.onPrimaryContainer),
+        inversePrimary = l(a.inversePrimary, b.inversePrimary), surfaceTint = l(a.surfaceTint, b.surfaceTint),
+        secondary = l(a.secondary, b.secondary), secondaryContainer = l(a.secondaryContainer, b.secondaryContainer),
+        onSecondaryContainer = l(a.onSecondaryContainer, b.onSecondaryContainer),
+        background = l(a.background, b.background), onBackground = l(a.onBackground, b.onBackground),
+        surface = l(a.surface, b.surface), onSurface = l(a.onSurface, b.onSurface),
+        surfaceVariant = l(a.surfaceVariant, b.surfaceVariant), onSurfaceVariant = l(a.onSurfaceVariant, b.onSurfaceVariant),
+        surfaceBright = l(a.surfaceBright, b.surfaceBright), surfaceDim = l(a.surfaceDim, b.surfaceDim),
+        surfaceContainerLowest = l(a.surfaceContainerLowest, b.surfaceContainerLowest), surfaceContainerLow = l(a.surfaceContainerLow, b.surfaceContainerLow),
+        surfaceContainer = l(a.surfaceContainer, b.surfaceContainer), surfaceContainerHigh = l(a.surfaceContainerHigh, b.surfaceContainerHigh),
+        surfaceContainerHighest = l(a.surfaceContainerHighest, b.surfaceContainerHighest),
+        outlineVariant = l(a.outlineVariant, b.outlineVariant), inverseSurface = l(a.inverseSurface, b.inverseSurface),
+        inverseOnSurface = l(a.inverseOnSurface, b.inverseOnSurface),
+    )
+}
+
 fun softLightScheme(seed: Color?): ColorScheme {
     fun tone(l: Float, base: Color) = seed?.let { Color(Contrast.softSurface(it.toArgb(), l)) }?.let { lerp(base, it, 0.35f) } ?: base
     val bg = tone(0.965f, MsLight.Canvas); val s1 = tone(0.945f, MsLight.Surface1); val s2 = tone(0.915f, MsLight.Surface2); val s3 = tone(0.88f, MsLight.Surface3)
@@ -162,26 +212,61 @@ val MsTypography = Typography(
     labelLarge = s(14, 600, 18, 0.008), labelMedium = s(12, 600, 16, 0.015), labelSmall = s(11, 650, 14, 0.03),
 )
 
-/** Extracts a seed colour from artwork (Coil + Palette, off the main thread). */
-suspend fun artSeed(context: android.content.Context, url: String?): Color? = withContext(Dispatchers.IO) {
-    if (url == null) return@withContext null
-    val req = ImageRequest.Builder(context).data(url).size(96).allowHardware(false).build()
-    val res = SingletonImageLoader.get(context).execute(req) as? SuccessResult ?: return@withContext null
-    val bmp: Bitmap = (res.image as? BitmapImage)?.bitmap ?: return@withContext null
-    val p = Palette.from(bmp).maximumColorCount(12).generate()
-    (p.vibrantSwatch ?: p.mutedSwatch ?: p.dominantSwatch)?.rgb?.let { Color(it) }
+/*
+ * 1.0.5: palette extraction cost. Both helpers below decode the art at 96 px (Coil size(96)), software
+ * (allowHardware(false): Palette has to read pixels) and now RGB_565 (half the bytes of ARGB_8888; Android keeps
+ * ARGB_8888 by itself for art with alpha). Palette quantises every pixel to 5 bits per channel, which is exactly what
+ * RGB_565 keeps for red/blue (and 6 for green), so the swatches are identical. The finished colours are memoised per
+ * URL: the theme, each Home hero page and every player screen used to re-run Palette.generate on the same cover each
+ * time it (re)composed or the song came back round. Only successes are cached, so a failed/offline load retries.
+ */
+private fun paletteRequest(context: android.content.Context, url: String): ImageRequest =
+    ImageRequest.Builder(context).data(url).size(96).allowHardware(false).bitmapConfig(Bitmap.Config.RGB_565).build()
+
+private val seedCache = android.util.LruCache<String, Color>(64)          // 1.0.5: url -> artSeed result
+private val paletteCache = android.util.LruCache<String, Pair<Color, Color>>(64) // 1.0.5: url -> artPalette result
+
+private val pickCache = android.util.LruCache<String, com.ravi.musicspot.logic.ArtTheme.Picked>(64) // 1.0.7
+
+/** 1.0.7: the artwork's scored accent + dominant colour (one Palette run per cover, memoised). */
+suspend fun artPick(context: android.content.Context, url: String?): com.ravi.musicspot.logic.ArtTheme.Picked? {
+    if (url == null) return null
+    pickCache.get(url)?.let { return it }
+    return withContext(Dispatchers.IO) {
+        val res = SingletonImageLoader.get(context).execute(paletteRequest(context, url)) as? SuccessResult ?: return@withContext null
+        val bmp: Bitmap = (res.image as? BitmapImage)?.bitmap ?: return@withContext null
+        val p = Palette.from(bmp).maximumColorCount(16).generate()
+        com.ravi.musicspot.logic.ArtTheme.pick(p.swatches.map { it.rgb to it.population })?.also { pickCache.put(url, it) }
+    }
+}
+
+/** Extracts a seed colour from artwork (Coil + Palette, off the main thread). 1.0.7: the scored accent. */
+suspend fun artSeed(context: android.content.Context, url: String?): Color? {
+    if (url == null) return null
+    seedCache.get(url)?.let { return it } // 1.0.5: no IO hop / Palette run for a cover already seen
+    return withContext(Dispatchers.IO) {
+        val res = SingletonImageLoader.get(context).execute(paletteRequest(context, url)) as? SuccessResult ?: return@withContext null
+        val bmp: Bitmap = (res.image as? BitmapImage)?.bitmap ?: return@withContext null
+        val p = Palette.from(bmp).maximumColorCount(16).generate()
+        (com.ravi.musicspot.logic.ArtTheme.pick(p.swatches.map { it.rgb to it.population })?.accent
+            ?: (p.vibrantSwatch ?: p.mutedSwatch ?: p.dominantSwatch)?.rgb)?.let { Color(it) }?.also { seedCache.put(url, it) }
+    }
 }
 
 /** v2.0.5: two artwork colours for the player background (vibrant/dominant, then dark muted/dark vibrant). */
-suspend fun artPalette(context: android.content.Context, url: String?): Pair<Color, Color>? = withContext(Dispatchers.IO) {
-    if (url == null) return@withContext null
-    val req = ImageRequest.Builder(context).data(url).size(96).allowHardware(false).build()
-    val res = SingletonImageLoader.get(context).execute(req) as? SuccessResult ?: return@withContext null
-    val bmp: Bitmap = (res.image as? BitmapImage)?.bitmap ?: return@withContext null
-    val p = Palette.from(bmp).maximumColorCount(16).generate()
-    val a = (p.vibrantSwatch ?: p.dominantSwatch ?: p.mutedSwatch)?.rgb ?: return@withContext null
-    val b = (p.darkMutedSwatch ?: p.darkVibrantSwatch ?: p.mutedSwatch ?: p.dominantSwatch)?.rgb ?: a
-    Color(a) to Color(b)
+suspend fun artPalette(context: android.content.Context, url: String?): Pair<Color, Color>? {
+    if (url == null) return null
+    paletteCache.get(url)?.let { return it } // 1.0.5
+    return withContext(Dispatchers.IO) {
+        val res = SingletonImageLoader.get(context).execute(paletteRequest(context, url)) as? SuccessResult ?: return@withContext null
+        val bmp: Bitmap = (res.image as? BitmapImage)?.bitmap ?: return@withContext null
+        val p = Palette.from(bmp).maximumColorCount(16).generate()
+        // 1.0.7: the scored accent (big AND colourful) instead of the vibrant speck.
+        val a = com.ravi.musicspot.logic.ArtTheme.pick(p.swatches.map { it.rgb to it.population })?.accent
+            ?: (p.vibrantSwatch ?: p.dominantSwatch ?: p.mutedSwatch)?.rgb ?: return@withContext null
+        val b = (p.darkMutedSwatch ?: p.darkVibrantSwatch ?: p.mutedSwatch ?: p.dominantSwatch)?.rgb ?: a
+        (Color(a) to Color(b)).also { paletteCache.put(url, it) }
+    }
 }
 
 /** Resolves the Theme setting to dark/light (System follows the device's dark mode). */
@@ -193,7 +278,7 @@ fun isDarkTheme(mode: ThemeMode): Boolean = when (mode) {
 }
 
 /** v2.0.16: the playing song's artwork colour (always extracted, even with dynamic colour off) – used by Water glass. */
-val LocalSongTint = androidx.compose.runtime.staticCompositionLocalOf<Color?> { null }
+val LocalSongTint = androidx.compose.runtime.compositionLocalOf<Color?> { null } // 1.0.5: dynamic local, so the 980 ms tint fade recomposes only readers, not the whole tree
 
 @Composable
 fun MusicSpotTheme(artUrl: String?, dynamic: Boolean, mode: ThemeMode = ThemeMode.DARK, content: @Composable () -> Unit) {
@@ -201,19 +286,22 @@ fun MusicSpotTheme(artUrl: String?, dynamic: Boolean, mode: ThemeMode = ThemeMod
     val dark = isDarkTheme(mode)
     val pureBlack = mode == ThemeMode.PURE_BLACK
     // v2.0.16: extract the art colour once; the scheme uses it only when dynamic colour is on, Water glass always.
-    var art by remember { mutableStateOf<Color?>(null) }
-    LaunchedEffect(artUrl) { art = runCatching { artSeed(ctx, artUrl) }.getOrNull() }
-    val seed = if (dynamic) art else null
-    val target = remember(seed, dark, pureBlack) { softScheme(seed, dark, pureBlack) }
-    val songTint by animateColorAsState(art ?: target.primary, tween(980), label = "song")
-    // Colours glide when the song changes instead of snapping.
-    val primary by animateColorAsState(target.primary, tween(980), label = "p")
-    val bg by animateColorAsState(target.background, tween(980), label = "bg")
-    val s1 by animateColorAsState(target.surfaceContainerLow, tween(980), label = "s1")
-    val s2 by animateColorAsState(target.surfaceContainerHigh, tween(980), label = "s2")
-    val s3 by animateColorAsState(target.surfaceContainerHighest, tween(980), label = "s3")
-    val scheme = target.copy(primary = primary, background = bg, surface = bg, surfaceContainerLowest = if (dark) bg else target.surfaceContainerLowest, surfaceContainerLow = s1,
-        surfaceContainer = s1, surfaceContainerHigh = s2, surfaceContainerHighest = s3, surfaceVariant = s2)
+    var pick by remember { mutableStateOf<com.ravi.musicspot.logic.ArtTheme.Picked?>(null) }
+    LaunchedEffect(artUrl) { pick = runCatching { artPick(ctx, artUrl) }.getOrNull() ?: if (artUrl == null) null else pick }
+    val art = pick?.let { Color(it.accent) }
+    // 1.0.7: the scheme comes from the art's scored colours (dynamic on), and the WHOLE scheme glides over 980 ms.
+    val target = remember(if (dynamic) pick else null, dark, pureBlack) { artScheme(if (dynamic) pick else null, dark, pureBlack) }
+    val songTint by animateColorAsState(art ?: target.primary, tween(600), label = "song") // 1.0.8: was 980
+    var from by remember { mutableStateOf(target) }
+    var to by remember { mutableStateOf(target) }
+    val glide = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(target) {
+        if (target == to) return@LaunchedEffect
+        from = lerpScheme(from, to, glide.value) // start from what is on screen, even mid-glide
+        to = target
+        glide.snapTo(0f); glide.animateTo(1f, tween(600)) // 1.0.8: was 980
+    }
+    val scheme = lerpScheme(from, to, glide.value)
     // System bar icons follow the theme (light icons on dark, dark icons on light).
     val view = LocalView.current
     if (!view.isInEditMode) DisposableEffect(dark) {

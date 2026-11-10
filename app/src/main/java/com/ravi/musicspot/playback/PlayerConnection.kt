@@ -69,7 +69,9 @@ class PlayerConnection(private val ctx: Context) {
             controller = c
             c.addListener(object : Player.Listener { override fun onEvents(player: Player, events: Player.Events) = publish() })
             publish()
-            pendingOps.toList().forEach { it(c) }; pendingOps.clear()
+            // 1.0.5: run each queued op guarded, and clear the queue first so an op that throws can't replay the rest twice.
+            val ops = pendingOps.toList(); pendingOps.clear()
+            ops.forEach { op -> runCatching { op(c) }.onFailure { com.ravi.musicspot.core.CrashGuard.nonFatal(ctx, "MediaController.pendingOp", it) } }
             pollJob?.cancel() // v2.0.14: one poll loop only
             pollJob = scope.launch { while (isActive) { controller?.let { _position.value = it.currentPosition.coerceAtLeast(0) }; delay(250) } }
         }, androidx.core.content.ContextCompat.getMainExecutor(ctx))
@@ -94,7 +96,14 @@ class PlayerConnection(private val ctx: Context) {
         // StackOverflowError. Now an explicit branch.
         var c = controller
         if (c != null && !c.isConnected) { runCatching { c.release() }; controller = null; c = null } // v2.0.14: stale controller -> reconnect
-        if (c != null) op(c) else { pendingOps += op; connect() }
+        // 1.0.5: the controller's own application looper is the authority (it is the main looper today because
+        // connect() builds it there, but an op must never run on another thread even if that changes).
+        if (c != null && c.applicationLooper != android.os.Looper.myLooper()) { android.os.Handler(c.applicationLooper).post { run(op) }; return }
+        if (c != null) op(c) else {
+            // 1.0.5: bounded: a controller that keeps failing to connect no longer piles up commands without limit.
+            if (pendingOps.size >= MAX_PENDING) pendingOps.removeAt(0)
+            pendingOps += op; connect()
+        }
     }
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -105,6 +114,21 @@ class PlayerConnection(private val ctx: Context) {
         c.prepare(); c.play()
     }
     fun playNext(t: Track) = run { c -> if (c.mediaItemCount == 0) play(listOf(t)) else c.addMediaItem((c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount), t.toMediaItem()) }
+    /** 1.0.2: a whole list right after the playing song (playlist ⋮ › Play next). */
+    fun playNextAll(tracks: List<Track>) = run { c ->
+        if (tracks.isEmpty()) return@run
+        if (c.mediaItemCount == 0) play(tracks) else c.addMediaItems((c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount), tracks.map(Track::toMediaItem))
+    }
+    /** 1.0.2 Listen together: replace the queue and start [tracks][start] at [positionMs]. */
+    fun playAt(tracks: List<Track>, start: Int, positionMs: Long, playing: Boolean) = run { c ->
+        if (tracks.isEmpty()) return@run
+        c.shuffleModeEnabled = false
+        c.setMediaItems(tracks.map { it.toMediaItem() }, start.coerceIn(0, tracks.lastIndex), positionMs.coerceAtLeast(0))
+        c.prepare(); c.playWhenReady = playing
+        _position.value = positionMs
+    }
+    /** 1.0.2: play or pause explicitly (toggle() flips whatever the state is). */
+    fun setPlaying(on: Boolean) = run { c -> if (on) { if (c.playbackState == Player.STATE_IDLE) c.prepare(); c.play() } else c.pause() }
     fun addToQueue(tracks: List<Track>) = run { c -> if (c.mediaItemCount == 0) play(tracks) else c.addMediaItems(tracks.map(Track::toMediaItem)) }
     fun toggle() = run { c -> if (c.isPlaying) c.pause() else { if (c.playbackState == Player.STATE_IDLE) c.prepare(); c.play() } }
     fun next() = run { it.seekToNext() }
@@ -126,6 +150,8 @@ class PlayerConnection(private val ctx: Context) {
     fun sleepAdjust(minutes: Int) { Playback.sleep.adjust(minutes * 60_000L, System.currentTimeMillis()); Playback.sleepTick.value = System.currentTimeMillis() }
     fun sleepCancel() { Playback.sleep.cancel(); Playback.sleepTick.value = System.currentTimeMillis(); run { it.volume = 1f } }
     val sleepActive: Boolean get() = Playback.sleep.mode != SleepTimer.Mode.OFF
+
+    private companion object { const val MAX_PENDING = 32 }
 
     @Suppress("unused") private fun items(c: MediaController): List<MediaItem> = (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
 }

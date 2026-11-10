@@ -54,6 +54,9 @@ object SeedArtists {
         persistAndRefresh()
     }
 
+    /** 1.0.2: Backup restore. */
+    fun replace(list: List<SeedArtist>) { _state.value = list.distinctBy { it.id }; persistAndRefresh() }
+
     fun clear() {
         if (_state.value.isEmpty()) return
         _state.value = emptyList()

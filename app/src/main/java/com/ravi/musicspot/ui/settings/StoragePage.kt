@@ -91,7 +91,7 @@ fun StoragePage() {
     }
 
     SettingsScaffold("Storage") {
-        item {
+        item(key = "storagepage-1", contentType = "static") {
             Group("This device") {
                 val z = sizes
                 if (z == null) Row(Modifier.fillMaxWidth().padding(16.dp)) { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) }
@@ -116,7 +116,7 @@ fun StoragePage() {
                 }
             }
         }
-        item {
+        item(key = "storagepage-2", contentType = "static") {
             Group("Streaming cache limit", footer = "A new limit applies the next time the app starts. Older audio is removed first when the cache is full.") {
                 ChoiceRow(null, listOf(256, 512, 1024, 2048, 4096), s.cacheLimitMb, ::limitLabel) { v -> Graph.settings.update { it.copy(cacheLimitMb = v) } }
             }
@@ -175,7 +175,7 @@ fun DiagnosticsPage() {
     LaunchedEffect(Unit) { runAll() }
 
     SettingsScaffold("Diagnostics") {
-        item {
+        item(key = "storagepage-3", contentType = "static") {
             Group {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(if (online) "Online${if (Graph.metered) " · metered (mobile data)" else " · unmetered"}" else "Offline", style = MaterialTheme.typography.titleMedium)
@@ -197,7 +197,7 @@ fun DiagnosticsPage() {
                 }
             }
         }
-        item {
+        item(key = "storagepage-4", contentType = "static") {
             Group("Sources") {
                 kinds.forEachIndexed { i, k ->
                     if (i > 0) RowDivider()

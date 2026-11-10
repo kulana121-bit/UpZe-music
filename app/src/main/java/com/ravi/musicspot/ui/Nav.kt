@@ -36,6 +36,10 @@ sealed interface Route {
     data object Liked : Route
     data object History : Route
     data object Downloads : Route
+    /** 1.0.2 */
+    data object CachedSongs : Route
+    data object ListenTogether : Route
+    data object Radio : Route
     data object DeviceMusic : Route
     data object Saved : Route
     data class SettingsPage(val page: String) : Route

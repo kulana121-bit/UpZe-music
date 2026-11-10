@@ -63,6 +63,10 @@ fun SettingsPageScreen(page: String) {
         "lyrics" -> LyricsPage()
         "appearance" -> AppearancePage()
         "storage" -> StoragePage()
+        "backup" -> BackupPage() // 1.0.2
+        "stats" -> ListenStatsPage() // 1.0.2
+        "ai" -> AiPage() // 1.0.2
+        "privacy" -> PrivacyPage() // 1.0.2
         "diagnostics" -> DiagnosticsPage()
         "about" -> AboutPage()
         "playbacklog" -> PlaybackLogPage()
@@ -80,17 +84,17 @@ fun AccountsPage() {
     val spStatus by Graph.sync.spotify.collectAsState()
     var confirm by remember { mutableStateOf<Account.Service?>(null) }
     SettingsScaffold("Accounts") {
-        item {
+        item(key = "settingspages-1", contentType = "static") {
             AccountCard("YouTube Music (Google)", accounts.firstOrNull { it.service == Account.Service.YOUTUBE }, ytStatus,
                 signedOutText = "Sign in to sync your likes, playlists, albums and history, and to get Premium-quality streams when your account has them.",
                 onSignIn = { nav.push(Route.GoogleLogin) }, onSync = { Graph.sync.syncYouTube() }, onSignOut = { confirm = Account.Service.YOUTUBE })
         }
-        item {
+        item(key = "settingspages-2", contentType = "static") {
             AccountCard("Spotify", accounts.firstOrNull { it.service == Account.Service.SPOTIFY }, spStatus,
                 signedOutText = "Sign in to import your Liked Songs and playlists. Spotify songs are matched to sources that can play them; nothing streams from Spotify.",
                 onSignIn = { nav.push(Route.SpotifyLogin) }, onSync = { Graph.sync.syncSpotify() }, onSignOut = { confirm = Account.Service.SPOTIFY })
         }
-        item { InfoText("Sign-in cookies are encrypted with a key kept in the Android Keystore, never leave this device and are excluded from backups. Music servers (Navidrome, Jellyfin) are set up under Sources.") }
+        item(key = "settingspages-3", contentType = "static") { InfoText("Sign-in cookies are encrypted with a key kept in the Android Keystore, never leave this device and are excluded from backups. Music servers (Navidrome, Jellyfin) are set up under Sources.") }
     }
     com.ravi.musicspot.ui.motion.MotionAlertDialog(item = confirm, onDismissRequest = { confirm = null },
         title = { svc -> Text("Sign out of ${if (svc == Account.Service.YOUTUBE) "YouTube Music" else "Spotify"}?") },
@@ -140,19 +144,19 @@ fun QualityPage() {
     val s by Graph.settings.state.collectAsState()
     val q = Quality.entries
     SettingsScaffold("Quality") {
-        item { Group("On Wi-Fi") { OptionList(q, s.quality, { it.label }, { it.detail }) { v -> Graph.settings.update { it.copy(quality = v) } } } }
-        item {
+        item(key = "settingspages-4", contentType = "static") { Group("On Wi-Fi") { OptionList(q, s.quality, { it.label }, { it.detail }) { v -> Graph.settings.update { it.copy(quality = v) } } } }
+        item(key = "settingspages-5", contentType = "static") {
             Group("On mobile data", footer = "Used whenever the connection is metered (mobile data or a metered hotspot).") {
                 OptionList(q, s.mobileQuality, { it.label }, { it.detail }) { v -> Graph.settings.update { it.copy(mobileQuality = v) } }
             }
         }
-        item {
+        item(key = "settingspages-6", contentType = "static") {
             Group("Downloads") {
                 ChoiceRow("Download quality", q, s.downloadQuality, { it.label }) { v -> Graph.settings.update { it.copy(downloadQuality = v) } }
                 SwitchRow("Download on Wi-Fi only", "Queued downloads wait for an unmetered network", s.wifiOnlyDownloads) { v -> Graph.settings.update { it.copy(wifiOnlyDownloads = v) } }
             }
         }
-        item { InfoText("YouTube Music and JioSaavn top out at lossy 256–320 kbps. Lossless comes from your own files and servers (Navidrome, Jellyfin) and free catalogues that offer FLAC (Jamendo, Internet Archive). The player shows the real codec and bitrate of what is playing.") }
+        item(key = "settingspages-7", contentType = "static") { InfoText("YouTube Music and JioSaavn top out at lossy 256–320 kbps. Lossless comes from your own files and servers (Navidrome, Jellyfin) and free catalogues that offer FLAC (Jamendo, Internet Archive). The player shows the real codec and bitrate of what is playing.") }
     }
 }
 
@@ -163,7 +167,7 @@ fun PlaybackPage() {
     val s by Graph.settings.state.collectAsState()
     val bitPerfect by Playback.bitPerfectStatus.collectAsState()
     SettingsScaffold("Playback") {
-        item {
+        item(key = "settingspages-8", contentType = "static") {
             Group("Transitions") {
                 SwitchRow("Gapless playback", "Albums play without a gap between songs. Turn off to use crossfade.", s.gapless) { v -> Graph.settings.update { it.copy(gapless = v, crossfadeSec = if (!v && it.crossfadeSec == 0) 4 else it.crossfadeSec) } }
                 RowDivider()
@@ -171,12 +175,13 @@ fun PlaybackPage() {
                     subtitle = if (s.gapless) "Off while gapless is on" else "Fades out the end of a song and fades in the next") { v -> Graph.settings.update { it.copy(crossfadeSec = v.roundToInt()) } }
             }
         }
-        item {
+        item(key = "settingspages-9", contentType = "static") {
             Group("Queue") {
                 SwitchRow("Autoplay", "When the queue ends, keep playing similar songs (radio)", s.autoplay) { v -> Graph.settings.update { it.copy(autoplay = v) } }
             }
         }
-        item {
+        item(key = "settingspages-10", contentType = "static") { PlaybackExtrasGroups() } // 1.0.2
+        item(key = "settingspages-11", contentType = "static") {
             Group("Sleep timer defaults") {
                 ChoiceRow("Default duration", listOf(10, 15, 20, 30, 45, 60, 90), s.sleepDefaultMin, { "$it min" }, subtitle = "Offered in the player's sleep timer") { v -> Graph.settings.update { it.copy(sleepDefaultMin = v) } }
                 RowDivider()
@@ -185,7 +190,7 @@ fun PlaybackPage() {
                 SwitchRow("Finish the current song", "Wait for the song to end instead of stopping mid-song", s.sleepFinishSong) { v -> Graph.settings.update { it.copy(sleepFinishSong = v) } }
             }
         }
-        item {
+        item(key = "settingspages-12", contentType = "static") {
             val usbOk = Build.VERSION.SDK_INT >= 34
             Group("Hi-res output", footer = "Both options bypass the software engine (EQ, Enhance) so samples reach the output untouched. They take effect the next time the player starts (close and reopen the app).") {
                 SwitchRow("Pure hi-res output", "Float output path: 24-bit / 96 kHz+ files are not truncated", s.pureHiRes) { v -> Graph.settings.update { it.copy(pureHiRes = v) } }
@@ -205,7 +210,7 @@ fun LyricsPage() {
     val labels = remember { Graph.lyricsProviders().associate { it.id to it.label } }
     val order = (s.lyricsOrder + labels.keys).distinct().filter { it in labels }
     SettingsScaffold("Lyrics") {
-        item {
+        item(key = "settingspages-13", contentType = "static") {
             Group("Provider order", footer = "Long-press the handle and drag. The first provider that has lyrics for a song wins; synced lyrics are preferred.") {
                 ReorderList(order, onReorder = { l -> Graph.settings.update { it.copy(lyricsOrder = l) } }, label = { labels[it] ?: it }) { id, index, handle ->
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -219,16 +224,19 @@ fun LyricsPage() {
                 }
             }
         }
-        item {
+        item(key = "settingspages-14", contentType = "static") {
             Group("Sync") {
                 SliderRow("Sync offset", s.lyricsOffsetMs.toFloat(), -3000f..3000f, "%+.2f s".format(s.lyricsOffsetMs / 1000f), steps = 119,
                     subtitle = "Positive shows lines earlier; also adjustable from the lyrics panel") { v -> Graph.settings.update { it.copy(lyricsOffsetMs = (v / 50).roundToInt() * 50) } }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) { TextButton(onClick = { Graph.settings.update { it.copy(lyricsOffsetMs = 0) } }, enabled = s.lyricsOffsetMs != 0) { Text("Reset offset") } }
                 RowDivider()
                 SwitchRow("Romanize", "Show Latin-script lines for Japanese, Korean, Hindi and other scripts", s.romanize) { v -> Graph.settings.update { it.copy(romanize = v) } }
+                RowDivider()
+                // 1.0.8: also switchable from the player's ⋯ menu.
+                SwitchRow("Motion Lyrics", "Lyrics move over the artwork on Now Playing, with the beat and tone of the song", s.liveLyrics) { v -> Graph.settings.update { it.copy(liveLyrics = v) } }
             }
         }
-        item {
+        item(key = "settingspages-15", contentType = "static") {
             Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 OutlinedButton(onClick = { Graph.lyricsCache.clear(); com.ravi.musicspot.ui.Pills.show("Lyrics cache cleared") }) { Text("Clear lyrics cache") }
             }
@@ -242,35 +250,38 @@ fun LyricsPage() {
 fun AppearancePage() {
     val s by Graph.settings.state.collectAsState()
     SettingsScaffold("Appearance") {
-        item {
+        item(key = "settingspages-16", contentType = "static") {
             Group("Colour") {
                 ChoiceRow("Theme", com.ravi.musicspot.data.ThemeMode.entries, s.themeMode, { it.label }) { v -> Graph.settings.update { it.copy(themeMode = v) } }
                 RowDivider()
                 SwitchRow("Dynamic colour", "Tint the app with soft colours from the playing song's artwork", s.dynamicColor) { v -> Graph.settings.update { it.copy(dynamicColor = v) } }
             }
         }
-        item {
-            Group("Player, dock & home", footer = "Switch any time; the classic designs stay available.") {
-                ChoiceRow("Now Playing design", com.ravi.musicspot.data.PlayerStyle.entries, s.playerStyle, { it.label },
-                    subtitle = "Aura: liquid-glass deck · Vinyl: spinning record · Minimal: big bold type") { v -> Graph.settings.update { it.copy(playerStyle = v) } }
-                RowDivider()
+        item(key = "settingspages-17", contentType = "static") {
+            Group("Dock") {
                 ChoiceRow("Dock design", com.ravi.musicspot.data.DockStyle.entries, s.dockStyle, { it.label },
-                    subtitle = "Island: one glass island · Capsule: two floating pills · Edge: full-width bar") { v -> Graph.settings.update { it.copy(dockStyle = v) } }
-                RowDivider()
-                ChoiceRow("Home design", com.ravi.musicspot.data.HomeStyle.entries, s.homeStyle, { it.label },
-                    subtitle = "Aura: hero carousel · Bento: grid tiles · Spotlight: big artwork; same sections in all") { v -> Graph.settings.update { it.copy(homeStyle = v) } }
+                    subtitle = "Classic: full-width bar with the mini player · Orb: glass tab pill with a floating cover") { v -> Graph.settings.update { it.copy(dockStyle = v) } }
             }
         }
-        item {
+        item(key = "settingspages-18", contentType = "static") {
             Group("Glass", footer = if (Graph.lowEnd) "This device reports low memory, so solid surfaces are always used." else "Liquid needs Android 13+, frosted blur Android 12+; older versions use a tinted surface.") {
                 SwitchRow("Reduce effects", "Solid surfaces instead of blur and lens glass (faster, easier to read)", s.glass == GlassStyle.SOLID, enabled = !Graph.lowEnd) { v ->
                     Graph.settings.update { it.copy(glass = if (v) GlassStyle.SOLID else GlassStyle.LIQUID) }
                 }
                 RowDivider()
                 ChoiceRow("Glass style", GlassStyle.entries, s.glass, { it.label }, enabled = !Graph.lowEnd) { v -> Graph.settings.update { it.copy(glass = v) } }
+                RowDivider()
+                // 1.0.2: blur strength for the dock, mini player, player glass and sheets (0 = no blur, cheapest).
+                val blurOn = !Graph.lowEnd && s.glass != GlassStyle.SOLID && s.glass != GlassStyle.WATER
+                SliderRow("Blur intensity", s.blurIntensity, 0f..1f,
+                    valueLabel = if (s.blurIntensity < 0.02f) "Off" else "${(s.blurIntensity * 100).roundToInt()}%",
+                    steps = 9, enabled = blurOn,
+                    subtitle = if (blurOn) "Lower is lighter on older phones" else "Not used by this glass style") { v ->
+                    Graph.settings.update { it.copy(blurIntensity = (v * 10f).roundToInt() / 10f) }
+                }
             }
         }
-        item {
+        item(key = "settingspages-19", contentType = "static") {
             Group("Motion & touch") {
                 SwitchRow("Reduce motion", "Fades instead of slides and springs. Also follows the system “Remove animations” setting.", s.reduceMotion) { v -> Graph.settings.update { it.copy(reduceMotion = v) } }
                 RowDivider()
@@ -286,7 +297,7 @@ fun AppearancePage() {
         // 1.0.1: these rows used to flip `setupDone` off and rely on MainActivity swapping the whole UI, which never
         // recomposed (see MainActivity), so nothing opened. They now open the screens in-app, above the dock, and
         // Back / Close / Done return here.
-        item {
+        item(key = "settingspages-20", contentType = "static") {
             val nav = LocalNav.current
             val seeds by com.ravi.musicspot.data.SeedArtists.state.collectAsState()
             Group("Setup") {
@@ -325,7 +336,7 @@ fun AboutPage() {
     val checking by com.ravi.musicspot.update.Updater.checking.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     SettingsScaffold("About & licenses") {
-        item {
+        item(key = "settingspages-21", contentType = "static") {
             Group {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text("UpZe", style = MaterialTheme.typography.headlineSmall)
@@ -337,7 +348,7 @@ fun AboutPage() {
                 }
             }
         }
-        item {
+        item(key = "settingspages-22", contentType = "static") {
             // 1.0.0: in-app updates from GitHub Releases.
             Group("Updates") {
                 NavRow(androidx.compose.material.icons.Icons.Rounded.SystemUpdate, "Check for updates", if (checking) "Checking…" else "Looks for a newer UpZe release on GitHub") {
@@ -355,7 +366,7 @@ fun AboutPage() {
                 }
             }
         }
-        item {
+        item(key = "settingspages-23", contentType = "static") {
             // 1.0.0: developer and source code.
             Group("Developer") {
                 NavRow(androidx.compose.material.icons.Icons.Rounded.Person, "Developer", "Ravi") { com.ravi.musicspot.core.Links.open(ctx, com.ravi.musicspot.core.Links.GITHUB) }
@@ -369,7 +380,7 @@ fun AboutPage() {
                 }
             }
         }
-        item {
+        item(key = "settingspages-24", contentType = "static") {
             val nav = LocalNav.current
             Group("Troubleshooting") {
                 NavRow(null, "Playback log", "Every step of the last play attempts (YouTube clients, JioSaavn fallback, player errors). Copy or share it with the developer") {
@@ -381,7 +392,7 @@ fun AboutPage() {
                 }
             }
         }
-        item { InfoText("No music is hosted by UpZe. Streams come from the services you enable, your own files and your own servers.") }
+        item(key = "settingspages-25", contentType = "static") { InfoText("No music is hosted by UpZe. Streams come from the services you enable, your own files and your own servers.") }
     }
 }
 
@@ -394,15 +405,15 @@ fun PlaybackLogPage() {
     val text = remember(version) { com.ravi.musicspot.core.PlaybackLog.text() }
     var copied by remember { mutableStateOf(false) }
     SettingsScaffold("Playback log") {
-        item {
+        item(key = "settingspages-26", contentType = "static") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(text)); copied = true }) { Text(if (copied) "Copied" else "Copy") }
                 FilledTonalButton(onClick = { runCatching { ctx.startActivity(com.ravi.musicspot.core.PlaybackLog.shareIntent()) } }) { Text("Share") }
                 OutlinedButton(onClick = { com.ravi.musicspot.core.PlaybackLog.clear(); copied = false }) { Text("Clear") }
             }
         }
-        item { InfoText("Cookies, tokens and URL query strings are removed. Play a song that fails, then share this log.") }
-        item {
+        item(key = "settingspages-27", contentType = "static") { InfoText("Cookies, tokens and URL query strings are removed. Play a song that fails, then share this log.") }
+        item(key = "settingspages-28", contentType = "static") {
             Group {
                 if (text.isBlank()) Text("Nothing logged yet. Play a song first.", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else androidx.compose.foundation.text.selection.SelectionContainer {

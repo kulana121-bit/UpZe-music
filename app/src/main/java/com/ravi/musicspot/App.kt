@@ -17,15 +17,20 @@ import com.ravi.musicspot.data.DownloadsRepo
 import com.ravi.musicspot.data.LibraryRepo
 import com.ravi.musicspot.data.QueueStore
 import com.ravi.musicspot.data.SettingsRepo
+import com.ravi.musicspot.lyrics.AmllProvider
+import com.ravi.musicspot.lyrics.JioSaavnLyricsProvider
 import com.ravi.musicspot.lyrics.KuGouProvider
 import com.ravi.musicspot.lyrics.LrcLib
 import com.ravi.musicspot.lyrics.LyricsCache
 import com.ravi.musicspot.lyrics.LyricsChain
+import com.ravi.musicspot.lyrics.LyricsOvhProvider
 import com.ravi.musicspot.lyrics.LyricsPlusProvider
 import com.ravi.musicspot.lyrics.LyricsProvider
 import com.ravi.musicspot.lyrics.LyricsQuery
 import com.ravi.musicspot.lyrics.Lyrics
+import com.ravi.musicspot.lyrics.MusixmatchProvider
 import com.ravi.musicspot.lyrics.NetEaseProvider
+import com.ravi.musicspot.lyrics.QQMusicProvider
 import com.ravi.musicspot.lyrics.YtLyricsProvider
 import com.ravi.musicspot.model.SourceKind
 import com.ravi.musicspot.model.Track
@@ -36,6 +41,9 @@ import com.ravi.musicspot.source.JamendoSource
 import com.ravi.musicspot.source.JellyfinSource
 import com.ravi.musicspot.source.JioSaavnSource
 import com.ravi.musicspot.source.LocalSource
+import com.ravi.musicspot.source.MonochromeSource
+import com.ravi.musicspot.source.NetEaseSource
+import com.ravi.musicspot.source.QobuzProxySource
 import com.ravi.musicspot.source.SoundCloudSource
 import com.ravi.musicspot.source.SourceManager
 import com.ravi.musicspot.source.SubsonicSource
@@ -44,6 +52,8 @@ import com.ravi.musicspot.yt.Innertube
 import com.ravi.musicspot.yt.YtMusic
 import com.ravi.musicspot.yt.YtStreamResolver
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,10 +70,14 @@ import okio.Path.Companion.toOkioPath
 object Graph {
     lateinit var app: Application; private set
     lateinit var settings: SettingsRepo; private set
+    /** 1.0.2 Privacy › Incognito: nothing about what is played is remembered. */
+    val incognito: Boolean get() = ::settings.isInitialized && settings.value.incognito
     lateinit var library: LibraryRepo; private set
     lateinit var playStats: com.ravi.musicspot.data.PlayStatsRepo; private set
     lateinit var queueStore: QueueStore; private set
     lateinit var downloads: DownloadsRepo; private set
+    /** 1.0.2: index of fully cached songs (Library › Cached songs). */
+    val cached: com.ravi.musicspot.data.CachedSongs by lazy { com.ravi.musicspot.data.CachedSongs(app, app.filesDir) }
     lateinit var accounts: AccountStore; private set
     lateinit var tube: Innertube; private set
     lateinit var yt: YtMusic; private set
@@ -76,6 +90,8 @@ object Graph {
     lateinit var spotify: SpotifyClient; private set
     lateinit var sync: SyncManager; private set
     lateinit var lyricsCache: LyricsCache; private set
+    /** 1.0.6: lyrics saved with downloads (synced + romanized), read before any network lookup. */
+    lateinit var offlineLyrics: com.ravi.musicspot.lyrics.OfflineLyricsStore; private set
     lateinit var player: PlayerConnection; private set
 
     private val readyDeferred = CompletableDeferred<Unit>()
@@ -126,9 +142,13 @@ object Graph {
         archive = ArchiveSource(en(SourceKind.ARCHIVE))
         subsonic = SubsonicSource({ accounts.get(Account.Service.SUBSONIC) }, en(SourceKind.SUBSONIC))
         jellyfin = JellyfinSource({ accounts.get(Account.Service.JELLYFIN) }, en(SourceKind.JELLYFIN))
+        val netease = NetEaseSource(en(SourceKind.NETEASE))
+        val monochrome = MonochromeSource(en(SourceKind.MONOCHROME))
+        val qobuz = QobuzProxySource(en(SourceKind.QOBUZ))
         sources = SourceManager(
             mapOf(
                 SourceKind.YOUTUBE to yt, SourceKind.JIOSAAVN to jiosaavn, SourceKind.LOCAL to local,
+                SourceKind.NETEASE to netease, SourceKind.MONOCHROME to monochrome, SourceKind.QOBUZ to qobuz,
                 SourceKind.AUDIUS to AudiusSource(en(SourceKind.AUDIUS)), SourceKind.SOUNDCLOUD to SoundCloudSource(en(SourceKind.SOUNDCLOUD)),
                 SourceKind.JAMENDO to JamendoSource({ settings.value.jamendoClientId }, en(SourceKind.JAMENDO)),
                 SourceKind.ARCHIVE to archive, SourceKind.SUBSONIC to subsonic, SourceKind.JELLYFIN to jellyfin,
@@ -141,19 +161,27 @@ object Graph {
         )
         spotify = SpotifyClient(dir)
         lyricsCache = LyricsCache(File(app.cacheDir, "lyrics"))
+        offlineLyrics = com.ravi.musicspot.lyrics.OfflineLyricsStore(File(app.filesDir, "downloads/lyrics"))
         sync = SyncManager()
         player = PlayerConnection(app)
         guard("networkCallback", Unit) { watchNetwork(app) }
-        // v2.0.5: DNS + TLS/HTTP-2 to YouTube Music, JioSaavn, googlevideo and the artwork CDNs before the first tap.
-        guard("warmUp", Unit) { com.ravi.musicspot.core.Http.warmUp() }
         IoScope.launch {
             try {
-                guard("settings.load", Unit) { settings.load() }
-                guard("library.load", Unit) { library.load() }
-                guard("playStats.load", Unit) { playStats.load() }
-                guard("seedArtists.load", Unit) { com.ravi.musicspot.data.SeedArtists.load() } // v2.0.15: optional artist picker seeds
-                guard("downloads.load", Unit) { downloads.load() }
-                guard("accounts.load", Unit) { accounts.load() }
+                // 1.0.8 fast start: the stores are independent files, so they load in parallel (was one after another).
+                // Settings first-in-line is kept only for the session step, which needs both settings and accounts.
+                kotlinx.coroutines.coroutineScope {
+                    val jobs = listOf(
+                        async { guard("settings.load", Unit) { settings.load() } },
+                        async {
+                            guard("library.load", Unit) { library.load() }
+                            guard("playStats.load", Unit) { playStats.load(); playStats.seedFrom(library.data.value.history) }
+                        },
+                        async { guard("seedArtists.load", Unit) { com.ravi.musicspot.data.SeedArtists.load() } }, // v2.0.15: optional artist picker seeds
+                        async { guard("downloads.load", Unit) { downloads.load() } },
+                        async { guard("accounts.load", Unit) { accounts.load() } },
+                    )
+                    jobs.awaitAll()
+                }
                 guard("session", Unit) {
                     tube.cookie = accounts.get(Account.Service.YOUTUBE)?.secret
                     settings.value.region?.let { tube.region = it }
@@ -163,6 +191,9 @@ object Graph {
                 readyDeferred.complete(Unit)
                 _ready.value = true
             }
+            // v2.0.5: DNS + TLS/HTTP-2 to YouTube Music, JioSaavn, googlevideo and the artwork CDNs before the first tap.
+            // 1.0.8: moved off the main thread (building the shared OkHttp client cost ~30-80 ms of the cold start).
+            guard("warmUp", Unit) { com.ravi.musicspot.core.Http.warmUp() }
             if (settings.value.enabledSources.contains(SourceKind.LOCAL)) guard("local.scan", Unit) { local.scan() }
         }
     }
@@ -217,19 +248,71 @@ object Graph {
 
     // ---- lyrics ----------------------------------------------------------------------------------------------
     private val providers: Map<String, LyricsProvider> by lazy {
-        listOf(LrcLib, LyricsPlusProvider, KuGouProvider, NetEaseProvider,
-            YtLyricsProvider { vid -> yt.lyrics(vid)?.let { it.text to it.source } }).associateBy { it.id }
+        listOf(
+            LyricsPlusProvider, MusixmatchProvider, AmllProvider, KuGouProvider, NetEaseProvider,
+            QQMusicProvider, JioSaavnLyricsProvider, LrcLib,
+            YtLyricsProvider { vid -> yt.lyrics(vid)?.let { it.text to it.source } },
+            LyricsOvhProvider
+        ).associateBy { it.id }
     }
     fun lyricsProviders(): List<LyricsProvider> = providers.values.toList()
 
     suspend fun lyricsFor(t: Track, force: Boolean = false): Lyrics? = withContext(Dispatchers.IO) {
+        // 1.0.6: a downloaded song's own lyrics come first and need no network (unless the user asked to search again).
+        if (!force) offlineLyrics.get(t.id)?.let { saved -> return@withContext saved.lyrics }
         val key = "${t.title}|${t.artist}|${t.durationMs / 2000}"
         if (!force) { val (hit, cached) = lyricsCache.get(key); if (hit) return@withContext cached }
         val s = settings.value
         val chain = s.lyricsOrder.filter { it in s.lyricsEnabled }.mapNotNull { providers[it] }
+        if (t.source.isLive) return@withContext null // 1.0.2: a radio station has no lyrics
         val found = LyricsChain.find(chain, LyricsQuery(t.title, t.artist, t.album, t.durationMs, if (t.source == SourceKind.YOUTUBE) t.nativeId else null))
         lyricsCache.put(key, found)
+        // 1.0.6: a forced re-search of a downloaded song refreshes its offline copy too.
+        if (force && downloads.isDownloaded(t.id)) runCatching { saveOfflineLyrics(t, found) }
         found
+    }
+
+    /**
+     * 1.0.6: romanized lines for [l] (null where a line needs none), computed on Dispatchers.Default (ICU
+     * transliteration is CPU work that used to run inside composition on the main thread). A downloaded song's
+     * saved romanization is reused; results are kept in a small LRU per song.
+     */
+    suspend fun romanizedLines(t: Track, l: Lyrics.Synced): List<String?> {
+        val k = t.id + "#" + l.lines.size + "#" + l.source
+        synchronized(romanCache) { romanCache[k] }?.let { return it }
+        val saved = withContext(Dispatchers.IO) { offlineLyrics.get(t.id) }
+            ?.takeIf { (it.lyrics as? Lyrics.Synced)?.lines?.size == l.lines.size && it.roman.size == l.lines.size }?.roman
+        val out = saved ?: withContext(Dispatchers.Default) {
+            if (com.ravi.musicspot.lyrics.Romanizer.available) com.ravi.musicspot.lyrics.Romanizer.lines(l.lines.map { it.text }) else l.lines.map { null }
+        }
+        synchronized(romanCache) { romanCache[k] = out }
+        return out
+    }
+    private val romanCache = object : LinkedHashMap<String, List<String?>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String?>>?) = size > 12
+    }
+
+    /**
+     * 1.0.6 offline lyrics: after a download finishes, its lyrics (synced when any provider has them) and their
+     * romanization are saved with the download, so they show with no network. [known] skips the lookup when the
+     * caller already has the result. Safe to call repeatedly; never throws for a missing provider or no network.
+     */
+    suspend fun saveOfflineLyrics(t: Track, known: Lyrics? = null) = withContext(Dispatchers.IO) {
+        if (t.source.isLive) return@withContext
+        val l = known ?: run {
+            val key = "${t.title}|${t.artist}|${t.durationMs / 2000}"
+            val (hit, cached) = lyricsCache.get(key)
+            if (hit) cached else {
+                val s = settings.value
+                val chain = s.lyricsOrder.filter { it in s.lyricsEnabled }.mapNotNull { providers[it] }
+                LyricsChain.find(chain, LyricsQuery(t.title, t.artist, t.album, t.durationMs, if (t.source == SourceKind.YOUTUBE) t.nativeId else null))
+                    .also { lyricsCache.put(key, it) }
+            }
+        }
+        val roman = (l as? Lyrics.Synced)?.let { s ->
+            withContext(Dispatchers.Default) { if (com.ravi.musicspot.lyrics.Romanizer.available) com.ravi.musicspot.lyrics.Romanizer.lines(s.lines.map { it.text }) else emptyList() }
+        }.orEmpty()
+        offlineLyrics.put(t.id, l, roman)
     }
 }
 
@@ -244,6 +327,12 @@ class MusicSpotApp : Application(), coil3.SingletonImageLoader.Factory {
         .memoryCache { coil3.memory.MemoryCache.Builder().maxSizePercent(context, if (Graph.liteFx) 0.15 else 0.20).build() } // 1.0.1: smaller on lite devices
         .diskCache { coil3.disk.DiskCache.Builder().directory(java.io.File(context.cacheDir, "image_cache").toOkioPath()).maxSizeBytes(200L * 1024 * 1024).build() }
         .crossfade(!Graph.lowEnd)
+        // 1.0.5: deliberately NO loader-wide bitmapConfig(RGB_565). Coil 3.0.4's default config on API 26+ is HARDWARE
+        // (coil3.util.DEFAULT_BITMAP_CONFIG); a global RGB_565 would replace every on-screen cover's hardware bitmap
+        // (GPU memory, zero-copy draw) with a software one (Java heap + a GPU upload) and band gradients in large
+        // covers - a memory regression and a visual change. RGB_565 is set per request where pixels are read on the
+        // CPU: Palette (ui/theme/Theme.kt paletteRequest) and the blurred-art cache (ui/glass/ArtBlurCache.kt).
+        // allowHardware stays at Coil's default (true). Memory cache: 15% of heap on lite devices, 20% otherwise (above).
         .build()
 
     override fun onCreate() {
@@ -254,5 +343,30 @@ class MusicSpotApp : Application(), coil3.SingletonImageLoader.Factory {
         if (CrashGuard.isCrashProcess(this)) return
         runCatching { com.ravi.musicspot.core.PlaybackLog.init(this) }
         Graph.init(this)
+    }
+
+    /**
+     * 1.0.7: answer memory pressure instead of waiting for the low-memory killer (2 GB phones, music playing in the
+     * background). Hidden UI: the blurred-art cache and Coil's memory cache drop to half; real pressure while
+     * running: Coil's memory cache is cleared (covers come back from the disk cache, so nothing is lost visually).
+     * Playback, queue and downloads are untouched.
+     */
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (CrashGuard.isCrashProcess(this)) return
+        runCatching {
+            val mem = coil3.SingletonImageLoader.get(this).memoryCache
+            when {
+                level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ||
+                    level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> {
+                    mem?.clear(); com.ravi.musicspot.ui.glass.ArtBlurCache.trimHalf()
+                }
+                level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN ||
+                    level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
+                    mem?.let { it.trimToSize(it.maxSize / 2) }; com.ravi.musicspot.ui.glass.ArtBlurCache.trimHalf()
+                }
+            }
+        }
     }
 }

@@ -109,7 +109,7 @@ fun ArtistPickerStep(modifier: Modifier = Modifier, showTitle: Boolean = true) {
         if (!Graph.online.value) { results = emptyList(); searchError = "You're offline. Connect to search artists."; return@LaunchedEffect }
         loadingSearch = true
         try {
-            results = SeedArtists.search(q)
+            results = SeedArtists.search(q).distinctBy { it.id } // 1.0.7: keyed grid; a repeated id crashed it
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
             results = emptyList(); searchError = "Search failed. Check your connection."
         } finally { loadingSearch = false }

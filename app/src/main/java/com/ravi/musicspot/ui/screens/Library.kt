@@ -1,5 +1,9 @@
 package com.ravi.musicspot.ui.screens
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Radio
+import androidx.compose.material.icons.rounded.CloudDone
 import com.ravi.musicspot.ui.motion.pressScale
 import com.ravi.musicspot.ui.motion.staggerIn
 import com.ravi.musicspot.ui.motion.pressable
@@ -92,10 +96,11 @@ fun LibraryScreen() {
     var deleting by remember { mutableStateOf<LocalPlaylist?>(null) }
 
     // v2.0.14: distinct ids so keyed lazy items never collide.
-    val own = lib.playlists.filter { !it.isSynced }.distinctBy { it.id }
-    val yt = lib.playlists.filter { it.origin.startsWith("yt:") }.distinctBy { it.id }
-    val sp = lib.playlists.filter { it.origin.startsWith("spotify:") }.distinctBy { it.id }
-    val downloaded = dls.values.count { it.state == DownloadEntry.State.DONE }
+    // 1.0.5: remembered per data change (were re-filtered/sorted on every recomposition of the screen).
+    val own = remember(lib.playlists) { lib.playlists.filter { !it.isSynced }.distinctBy { it.id }.sortedByDescending { it.pinned } } // 1.0.2: pinned first
+    val yt = remember(lib.playlists) { lib.playlists.filter { it.origin.startsWith("yt:") }.distinctBy { it.id }.sortedByDescending { it.pinned } } // 1.0.2: pinned first
+    val sp = remember(lib.playlists) { lib.playlists.filter { it.origin.startsWith("spotify:") }.distinctBy { it.id }.sortedByDescending { it.pinned } } // 1.0.2: pinned first
+    val downloaded = remember(dls) { dls.values.count { it.state == DownloadEntry.State.DONE } }
 
     val header = rememberHeaderHeight() // v2.0.17
     GlassLayer(Modifier.fillMaxSize(), overlay = {
@@ -106,46 +111,57 @@ fun LibraryScreen() {
         }
     }) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = pagePadding(top = 76.dp, header = header.value)) {
-            item {
+            item(key = "lib-tiles", contentType = "lib-tiles") { // 1.0.5: key + contentType on every item
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(Modifier.staggerIn(0), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Tile(Icons.Rounded.Favorite, "Liked songs", count(lib.liked.size, "song"), Modifier.weight(1f)) { nav.push(Route.Liked) }
                         Tile(Icons.Rounded.Download, "Downloads", count(downloaded, "song"), Modifier.weight(1f)) { nav.push(Route.Downloads) }
                     }
                     Row(Modifier.staggerIn(1), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Tile(Icons.Rounded.History, "History", count(lib.history.size, "play"), Modifier.weight(1f)) { nav.push(Route.History) }
+                        Tile(Icons.Rounded.History, "History", count(lib.history.size, "song"), Modifier.weight(1f)) /* 1.0.6: one row per song now */ { nav.push(Route.History) }
                         Tile(Icons.Rounded.PhoneAndroid, "On this device", if (Graph.local.hasPermission()) count(device.size, "file") else "Allow access", Modifier.weight(1f)) { nav.push(Route.DeviceMusic) }
                     }
                     Tile(Icons.Rounded.Bookmark, "Albums & artists", count(lib.saved.size, "saved item"), Modifier.fillMaxWidth().staggerIn(2)) { nav.push(Route.Saved) }
+                    // 1.0.2: cached songs (offline), live radio, and Listen together.
+                    val cachedN by Graph.cached.complete.collectAsState()
+                    LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { Graph.cached.refresh() } } }
+                    Row(Modifier.staggerIn(3), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Tile(Icons.Rounded.CloudDone, "Cached songs", if (cachedN.isEmpty()) "Play offline" else count(cachedN.size, "song"), Modifier.weight(1f)) { nav.push(Route.CachedSongs) }
+                        Tile(Icons.Rounded.Radio, "Live radio", "FM near you", Modifier.weight(1f)) { nav.push(Route.Radio) }
+                    }
+                    val room by com.ravi.musicspot.together.ListenTogether.room.collectAsState()
+                    Tile(Icons.Rounded.Groups, "Listen together", room?.let { r -> "In room ${r.code}" + if (r.listeners > 0) " · ${count(r.listeners, "listener")}" else "" } ?: "Play in sync with friends",
+                        Modifier.fillMaxWidth().staggerIn(4)) { nav.push(Route.ListenTogether) }
                 }
             }
 
-            item { SectionHeader("Your playlists", action = "New", onAction = { creating = true }) }
-            if (own.isEmpty()) item {
+            item(key = "own-h", contentType = "section-header") { SectionHeader("Your playlists", action = "New", onAction = { creating = true }) }
+            if (own.isEmpty()) item(key = "own-empty", contentType = "empty") {
                 EmptyState(Icons.AutoMirrored.Rounded.PlaylistAdd, "No playlists yet",
                     "Create one here, or add any song to a new playlist from its ⋮ menu.", "Create playlist", onAction = { creating = true })
             }
-            itemsIndexed(own, key = { _, it -> it.id }) { i, p -> PlaylistRow(i + 3, /* v2.0.14: index, not indexOf */ p, { nav.push(Route.LocalPlaylist(p.id)) }, onRename = { renaming = p }, onDelete = { deleting = p }) }
+            // 1.0.5: keys namespaced per section so a playlist id in two sections can never collide; contentType for reuse.
+            itemsIndexed(own, key = { _, it -> "own:" + it.id }, contentType = { _, _ -> "playlist" }) { i, p -> PlaylistRow(i + 3, /* v2.0.14: index, not indexOf */ p, { nav.push(Route.LocalPlaylist(p.id)) }, onRename = { renaming = p }, onDelete = { deleting = p }) }
 
             if (ytSignedIn) {
-                item { SyncHeader("From YouTube Music", ytStatus) { Graph.sync.syncYouTube() } }
-                if (yt.isEmpty()) item {
+                item(key = "yt-h", contentType = "sync-header") { SyncHeader("From YouTube Music", ytStatus) { Graph.sync.syncYouTube() } }
+                if (yt.isEmpty()) item(key = "yt-empty", contentType = "empty") {
                     EmptyState(Icons.Rounded.CloudSync, if (ytStatus.running) "Syncing…" else "No YouTube Music playlists yet",
                         "Your YouTube Music playlists, likes and saved albums appear here after a sync.", if (ytStatus.running) null else "Sync now",
                         onAction = { Graph.sync.syncYouTube() })
                 }
-                itemsIndexed(yt, key = { _, it -> it.id }) { i, p -> PlaylistRow(i + 3, /* v2.0.14: index, not indexOf */ p, { nav.push(Route.LocalPlaylist(p.id)) }, onRename = null, onDelete = { deleting = p }) }
+                itemsIndexed(yt, key = { _, it -> "yt:" + it.id }, contentType = { _, _ -> "playlist" }) { i, p -> PlaylistRow(i + 3, /* v2.0.14: index, not indexOf */ p, { nav.push(Route.LocalPlaylist(p.id)) }, onRename = null, onDelete = { deleting = p }) }
             }
             if (spSignedIn) {
-                item { SyncHeader("From Spotify", spStatus) { Graph.sync.syncSpotify() } }
-                if (sp.isEmpty()) item {
+                item(key = "sp-h", contentType = "sync-header") { SyncHeader("From Spotify", spStatus) { Graph.sync.syncSpotify() } }
+                if (sp.isEmpty()) item(key = "sp-empty", contentType = "empty") {
                     EmptyState(Icons.Rounded.CloudSync, if (spStatus.running) "Syncing…" else "No Spotify playlists yet",
                         "Spotify playlists are read (titles only) and each song is matched to a source that can play it.", if (spStatus.running) null else "Sync now",
                         onAction = { Graph.sync.syncSpotify() })
                 }
-                itemsIndexed(sp, key = { _, it -> it.id }) { i, p -> PlaylistRow(i + 3, /* v2.0.14: index, not indexOf */ p, { nav.push(Route.LocalPlaylist(p.id)) }, onRename = null, onDelete = { deleting = p }) }
+                itemsIndexed(sp, key = { _, it -> "sp:" + it.id }, contentType = { _, _ -> "playlist" }) { i, p -> PlaylistRow(i + 3, /* v2.0.14: index, not indexOf */ p, { nav.push(Route.LocalPlaylist(p.id)) }, onRename = null, onDelete = { deleting = p }) }
             }
-            if (!ytSignedIn || !spSignedIn) item {
+            if (!ytSignedIn || !spSignedIn) item(key = "bring-playlists", contentType = "bring-playlists") {
                 Row(Modifier.fillMaxWidth().padding(16.dp).clip(Ms.r20).background(MaterialTheme.colorScheme.surfaceContainerLow)
                     .clickable { nav.open(Tab.SETTINGS, Route.SettingsPage("accounts")) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.CloudSync, null, tint = MaterialTheme.colorScheme.primary)
@@ -202,7 +218,7 @@ private fun PlaylistRow(index: Int, p: LocalPlaylist, onClick: () -> Unit, onRen
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(p.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val unmatched = p.tracks.count { it.source == com.ravi.musicspot.model.SourceKind.SPOTIFY }
+            val unmatched = remember(p.tracks) { p.tracks.count { it.source == com.ravi.musicspot.model.SourceKind.SPOTIFY } } // 1.0.5: counted once per change
             Text(buildString {
                 append(if (p.tracks.isEmpty()) "Empty" else "${p.tracks.size} songs")
                 if (unmatched > 0) append(" · $unmatched unmatched")

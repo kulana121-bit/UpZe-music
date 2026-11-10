@@ -88,8 +88,11 @@ class SourceManager(
         // v2.0.5 race: the fallback search starts together with YouTube, so its answer is ready when YouTube is slow or fails.
         var fallback: Deferred<List<Track>>? = null
         fun startFallback(kinds: List<SourceKind>): Deferred<List<Track>> = fallback ?: async { fallbackSearch(t, kinds) }.also { fallback = it }
-        for (cand in plan) {
+        // 1.0.6: plan entries a hedge already tried (and saw fail) are not tried a second time.
+        val hedgeFailed = HashSet<String>()
+        for ((ci, cand) in plan.withIndex()) {
             downloaded(cand.id)?.let { return@coroutineScope it }
+            if (cand.id in hedgeFailed) continue
             val src = sources[cand.source] ?: continue
             tried += cand.source
             val budget = if (cand.source == SourceKind.YOUTUBE) YT_BUDGET_MS else OTHER_BUDGET_MS
@@ -97,7 +100,11 @@ class SourceManager(
                 val r = (if (cand.source == SourceKind.YOUTUBE && fbKinds.isNotEmpty()) {
                     val fb = startFallback(fbKinds)
                     raceYouTube(cand, src, quality, metered, budget, fb)
-                } else withTimeoutOrNull(budget) { src.resolve(cand, quality, metered) })
+                } else {
+                    // 1.0.6 hedged request: a slow non-YouTube source gets the next plan entry asked in parallel.
+                    val backup = plan.drop(ci + 1).firstOrNull { it.id !in hedgeFailed && it.source != cand.source && it.source != SourceKind.YOUTUBE && sources[it.source] != null }
+                    hedged(cand, src, backup, quality, metered, budget, hedgeFailed)
+                })
                     ?: run { PlaybackLog.step(cand.source.label, "timed out"); throw SourceUnavailableException("${cand.source.label} timed out after ${budget / 1000} s") }
                 PlaybackLog.log("${r.info.source.label}: resolved (${r.info.codec ?: "?"})")
                 fallback?.cancel()
@@ -130,19 +137,58 @@ class SourceManager(
         throw err
     }
 
+    /**
+     * 1.0.7 lossless upgrade: [t] is playing from a lossy stream ([playing]); look for the same recording on the
+     * enabled lossless sources (in the user's priority order) and return a stream only when it really is lossless.
+     * Searches run together (6 s each); candidates are resolved one by one (12 s each). Null when nothing better.
+     */
+    suspend fun losslessUpgrade(t: Track, playing: com.ravi.musicspot.model.StreamInfo, metered: Boolean): Resolved? = coroutineScope {
+        if (QualityEstimate.isLosslessStream(playing)) return@coroutineScope null
+        val usable = enabledKinds()
+        val prio = priority()
+        val kinds = QualityEstimate.LOSSLESS_SOURCES.filter { it in usable && sources[it] != null }
+            .sortedBy { prio.indexOf(it).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+        if (kinds.isEmpty()) return@coroutineScope null
+        val lenient = t.source == SourceKind.YOUTUBE
+        val queries = TrackMatcher.searchQueries(t)
+        val found = kinds.map { k ->
+            async {
+                try {
+                    withTimeoutOrNull(6_000) {
+                        var hit: Track? = null
+                        for (q in queries) {
+                            val res = sources[k]?.search(q, 8).orEmpty()
+                            hit = TrackMatcher.best(t, res, if (lenient) TrackMatcher.LENIENT_THRESHOLD else TrackMatcher.THRESHOLD, lenient)
+                            if (hit != null) break
+                        }
+                        hit
+                    }
+                } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            }
+        }.awaitAll().filterNotNull().filter { it.id != t.id }
+        for (cand in found) {
+            val src = sources[cand.source] ?: continue
+            val r = try { withTimeoutOrNull(12_000) { src.resolve(cand, Quality.LOSSLESS, metered) } }
+                catch (e: CancellationException) { throw e } catch (e: Exception) { PlaybackLog.log("Upgrade: ${cand.source.label} failed: ${e.message}"); null }
+            if (r != null && QualityEstimate.isLosslessStream(r.info)) return@coroutineScope r
+            if (r != null) PlaybackLog.log("Upgrade: ${cand.source.label} answered ${r.info.label}, not lossless")
+        }
+        null
+    }
+
     private fun fallbackKinds(t: Track, usable: Set<SourceKind>, tried: Set<SourceKind>): List<SourceKind> =
         (listOf(SourceKind.JIOSAAVN) + priority() + sources.keys).distinct()
             .filter { it != SourceKind.YOUTUBE && it in usable && it !in tried && it in FALLBACK_SEARCHABLE && it != t.source }
 
     /**
-     * YouTube against the head-start fallback: YouTube alone for [RACE_AFTER_MS]; after that, a fallback match that
+     * YouTube against the head-start fallback: YouTube alone for [HEDGE_AFTER_MS]; after that, a fallback match that
      * resolves first wins (YouTube is cancelled), otherwise YouTube keeps its full [budget]. A YouTube failure is
      * rethrown so the caller's failover logs it and uses the fallback.
      */
     private suspend fun raceYouTube(cand: Track, src: MusicSource, quality: Quality, metered: Boolean, budget: Long, fb: Deferred<List<Track>>): Resolved? = coroutineScope {
         val started = System.currentTimeMillis()
         val yt = async { withTimeoutOrNull(budget) { src.resolve(cand, quality, metered) } }
-        withTimeoutOrNull(RACE_AFTER_MS) { yt.join() }
+        withTimeoutOrNull(HEDGE_AFTER_MS) { yt.join() } // 1.0.6: hedge after 1.5 s (was 6 s)
         if (yt.isCompleted) return@coroutineScope yt.await()
         // YouTube is slow: resolve the fallback match (if any) while YouTube keeps going; first stream wins.
         val alt = async {
@@ -171,6 +217,55 @@ class SourceManager(
             kotlinx.coroutines.delay(50)
         }
         null
+    }
+
+    /**
+     * 1.0.6 hedged resolve for a non-YouTube candidate: [cand] alone for [HEDGE_AFTER_MS]; if it has no stream by then,
+     * [backup] (the next plan entry) is resolved in parallel and the first stream wins (the other is cancelled). A
+     * primary failure waits for the backup; a backup failure is remembered in [hedgeFailed] so the plan walk doesn't
+     * ask it again. Without a backup this is exactly the pre-1.0.6 single resolve.
+     */
+    private suspend fun hedged(cand: Track, src: MusicSource, backup: Track?, quality: Quality, metered: Boolean, budget: Long, hedgeFailed: MutableSet<String>): Resolved? = coroutineScope {
+        val bsrc = backup?.let { sources[it.source] }
+        if (backup == null || bsrc == null) return@coroutineScope withTimeoutOrNull(budget) { src.resolve(cand, quality, metered) }
+        val started = System.currentTimeMillis()
+        val main = async { withTimeoutOrNull(budget) { src.resolve(cand, quality, metered) } }
+        withTimeoutOrNull(HEDGE_AFTER_MS) { main.join() }
+        if (main.isCompleted) return@coroutineScope main.await()
+        PlaybackLog.log("Hedge: ${cand.source.label} has no stream after ${HEDGE_AFTER_MS} ms; asking ${backup.source.label} in parallel")
+        val alt = async {
+            try { downloaded(backup.id) ?: withTimeoutOrNull(if (backup.source == SourceKind.YOUTUBE) YT_BUDGET_MS else OTHER_BUDGET_MS) { bsrc.resolve(backup, quality, metered) } }
+            catch (e: CancellationException) { throw e } catch (e: Exception) {
+                PlaybackLog.log("Hedge ${backup.source.label} failed: ${e.javaClass.simpleName}: ${e.message}"); null
+            }
+        }
+        while (true) {
+            if (main.isCompleted) {
+                val r = try { main.await() } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                    // Primary failed: the backup may still deliver.
+                    val b = alt.await()
+                    if (b != null) { PlaybackLog.log("Hedge: ${backup.source.label} delivered after ${cand.source.label} failed"); return@coroutineScope b }
+                    hedgeFailed += backup.id
+                    throw e
+                }
+                if (r != null) { alt.cancel(); return@coroutineScope r }
+                val b = alt.await() // primary timed out: the backup's answer (or null) decides
+                if (b == null) hedgeFailed += backup.id
+                return@coroutineScope b
+            }
+            if (alt.isCompleted) {
+                val b = alt.await()
+                if (b != null) {
+                    main.cancel()
+                    PlaybackLog.log("Hedge: ${b.info.source.label} was ready first (${System.currentTimeMillis() - started} ms); ${cand.source.label} cancelled")
+                    return@coroutineScope b
+                }
+                hedgeFailed += backup.id
+                return@coroutineScope main.await()
+            }
+            kotlinx.coroutines.delay(25)
+        }
+        @Suppress("UNREACHABLE_CODE") null
     }
 
     /**
@@ -216,9 +311,15 @@ class SourceManager(
         const val OTHER_BUDGET_MS = 15_000L
         /** v2.0.5: was 9 s (JioSaavn "search timed out" on Ravi's mobile network). */
         const val FALLBACK_SEARCH_MS = 20_000L
-        /** YouTube runs alone this long before a ready fallback stream may win the race. */
-        const val RACE_AFTER_MS = 6_000L
+        /**
+         * 1.0.6 hedged requests: the primary source runs alone this long; after that the fallback (YouTube's
+         * head-start search, or the next plan entry for other sources) is resolved in parallel and the first stream
+         * wins, so a slow source no longer delays the start. Was 6 s for YouTube only.
+         */
+        const val HEDGE_AFTER_MS = 1_500L
+        /** Kept for callers/tests that read the old name. */
+        const val RACE_AFTER_MS = HEDGE_AFTER_MS
         const val FALLBACK_RESOLVE_MS = 12_000L
-        private val FALLBACK_SEARCHABLE = setOf(SourceKind.JIOSAAVN, SourceKind.AUDIUS, SourceKind.JAMENDO, SourceKind.SUBSONIC, SourceKind.JELLYFIN, SourceKind.LOCAL, SourceKind.ARCHIVE)
+        private val FALLBACK_SEARCHABLE = setOf(SourceKind.JIOSAAVN, SourceKind.NETEASE, SourceKind.MONOCHROME, SourceKind.QOBUZ, SourceKind.AUDIUS, SourceKind.JAMENDO, SourceKind.SUBSONIC, SourceKind.JELLYFIN, SourceKind.LOCAL, SourceKind.ARCHIVE)
     }
 }

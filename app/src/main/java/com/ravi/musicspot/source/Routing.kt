@@ -92,6 +92,20 @@ object QualityEstimate {
     private val LOSSLESS = setOf("flac", "alac", "wav", "aiff", "aif", "ape", "wv")
     fun isLosslessFormat(f: String?) = f?.lowercase()?.let { it in LOSSLESS } == true
 
+    /**
+     * 1.0.7: is a resolved stream lossless? By its codec (FLAC/ALAC/WAV/…), else by bitrate (no lossy codec in the
+     * app goes above 500 kbps; 16-bit/44.1 kHz FLAC is ~700–1100). Unknown codec and bitrate count as lossy.
+     */
+    fun isLosslessStream(info: com.ravi.musicspot.model.StreamInfo): Boolean {
+        val c = info.codec?.lowercase().orEmpty()
+        if (LOSSLESS.any { c.contains(it) } || c.contains("pcm") || c.contains("lossless")) return true
+        if (c.contains("mp3") || c.contains("mpeg") || c.contains("aac") || c.contains("mp4a") || c.contains("opus") || c.contains("vorbis")) return false
+        return (info.bitrateKbps ?: 0) >= 600
+    }
+
+    /** 1.0.7: the sources that can stream lossless, used by the in-song upgrade. */
+    val LOSSLESS_SOURCES = listOf(SourceKind.QOBUZ, SourceKind.MONOCHROME, SourceKind.NETEASE, SourceKind.LOCAL, SourceKind.SUBSONIC, SourceKind.JELLYFIN)
+
     /** Rough rank in "kbps-equivalent": lossless 1000+, else the known/expected bitrate. */
     fun rank(t: Track, quality: Quality, premium: Boolean): Int {
         if (isLosslessFormat(t.format)) return if (quality == Quality.LOSSLESS || quality == Quality.MAX || t.source == SourceKind.LOCAL) 1411 else 300
@@ -99,12 +113,15 @@ object QualityEstimate {
         return when (t.source) {
             SourceKind.JIOSAAVN -> 320
             SourceKind.YOUTUBE -> if (premium) 256 else 160
+            SourceKind.NETEASE -> 320
+            SourceKind.MONOCHROME, SourceKind.QOBUZ -> 1411
             SourceKind.AUDIUS -> 320
             SourceKind.JAMENDO -> 200
             SourceKind.ARCHIVE -> 192
             SourceKind.SOUNDCLOUD -> 128
             SourceKind.LOCAL, SourceKind.SUBSONIC, SourceKind.JELLYFIN -> 256
             SourceKind.SPOTIFY -> 0
+            SourceKind.RADIO -> 128
         }
     }
 }
@@ -135,15 +152,25 @@ object SourceRouter {
 
     /** Which other sources are worth searching for a match of [original] (cost control: only ones that could win). */
     fun sourcesToSearch(original: Track, priority: List<SourceKind>, enabled: Set<SourceKind>, quality: Quality, premium: Boolean): List<SourceKind> {
-        val searchable = setOf(SourceKind.YOUTUBE, SourceKind.JIOSAAVN, SourceKind.AUDIUS, SourceKind.JAMENDO, SourceKind.SUBSONIC, SourceKind.JELLYFIN, SourceKind.LOCAL)
+        val searchable = setOf(SourceKind.YOUTUBE, SourceKind.JIOSAAVN, SourceKind.NETEASE, SourceKind.MONOCHROME, SourceKind.QOBUZ, SourceKind.AUDIUS, SourceKind.JAMENDO, SourceKind.SUBSONIC, SourceKind.JELLYFIN, SourceKind.LOCAL)
         val candidates = priority.filter { it in enabled && it in searchable && it != original.source }
         if (!original.source.playable) return candidates // Spotify metadata: must find something
         return when (quality) {
             Quality.AUTO, Quality.HIGH -> candidates.takeWhile { it != original.source }.filter { priority.indexOf(it) < priority.indexOf(original.source) }
             Quality.MAX, Quality.LOSSLESS -> {
                 val mine = QualityEstimate.rank(original, quality, premium)
-                candidates.filter { QualityEstimate.rank(Track("${it.prefix}:x", "", "", format = if (it in setOf(SourceKind.SUBSONIC, SourceKind.JELLYFIN, SourceKind.LOCAL)) "flac" else null), quality, premium) > mine }
+                candidates.filter { QualityEstimate.rank(Track("${it.prefix}:x", "", "", format = if (it in setOf(SourceKind.SUBSONIC, SourceKind.JELLYFIN, SourceKind.LOCAL, SourceKind.NETEASE, SourceKind.MONOCHROME, SourceKind.QOBUZ)) "flac" else null), quality, premium) > mine }
             }
         }
     }
+}
+
+/** 1.0.7: pure rules of the automatic lossless upgrade (unit-tested). */
+object LosslessUpgrade {
+    /**
+     * Should a complete cached copy be skipped so the sources are asked for a better stream? Only when online,
+     * when upgrades are wanted (quality not High) and the cached copy is lossy. A lossless cached copy always plays.
+     */
+    fun bypassCache(cached: com.ravi.musicspot.model.StreamInfo, online: Boolean, upgradeWanted: Boolean): Boolean =
+        online && upgradeWanted && !QualityEstimate.isLosslessStream(cached)
 }

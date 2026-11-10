@@ -1,5 +1,6 @@
 package com.ravi.musicspot.ui.player
 
+import androidx.compose.ui.draw.clipToBounds
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -41,6 +42,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.Explore
@@ -71,10 +73,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.inset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -112,8 +118,8 @@ private val ART = RoundedCornerShape(32.dp)
 private val PILL = RoundedCornerShape(percent = 50)
 
 /**
- * v2.0.10 "Aura" Now Playing (Settings → Appearance → Now Playing design). Same features as the classic player
- * (Canvas, panes, sleep, sound, like, shuffle/repeat, gestures, cover morph) in a new layout:
+ * v2.0.10 "Aura" Now Playing (1.0.6: the only Now Playing design): Canvas, panes, sleep, sound, like, shuffle/repeat,
+ * gestures and the cover morph, laid out as:
  *  - a slow aura of the artwork's soft colours drifting behind a blurred artwork wash;
  *  - floating artwork with a mirrored reflection, breathing while playing; swipe = skip, double-tap = like;
  *  - one liquid-glass control deck: title, lyrics capsule, a thick expressive seek bar, a morphing play button and a
@@ -134,40 +140,56 @@ fun AuraPlayerScreen(
     val st by Graph.player.state.collectAsState()
     val t = st.current ?: return
     var pane by rememberSaveable { mutableStateOf<Pane?>(null) }
+    val reveal = rememberPaneReveal() // 1.0.2: interactive swipe-up to Queue / Lyrics
     // 1.0.1: last full-screen page (Queue/Lyrics), reopened by a swipe up.
     var lastFull by rememberSaveable { mutableStateOf(Pane.QUEUE) }
     androidx.compose.runtime.LaunchedEffect(pane) { pane?.let { if (it.isFull()) lastFull = it } }
     var sleepSheet by remember { mutableStateOf(false) }
+    var soundSheet by remember { mutableStateOf(false) } // 1.0.7: EQ / Sound opens over the player
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val still = reducedMotion()
     val c = MaterialTheme.colorScheme
     androidx.activity.compose.BackHandler(enabled = true) { if (pane != null) pane = null else onCollapse() }
     val canvas = rememberCanvasUrl(t)
     val canvasOn = canvas != null && pane == null
+    // 1.0.8: Motion Lyrics (player ⋯ › Motion Lyrics) plays kinetic lyrics over the artwork; the artwork stays.
+    val playerSettings by Graph.settings.state.collectAsState()
+    val liveOn = playerSettings.liveLyrics
+    // 1.0.8: true while Motion Lyrics are actually playing (synced lyrics found): the background turns into the
+    // full-screen blurred artwork.
+    var motionBg by remember { mutableStateOf(false) }
+    // 1.0.8 (user): Motion Lyrics run on every song. Without a Canvas the artwork goes full-screen and blurred behind
+    // them; with a Spotify Canvas the video stays clear (no blur, no dark wash) and the lyrics play over it.
+    val motionOn = liveOn
+    val motionShowing = motionOn && motionBg
 
     GlassLayer(
-        Modifier.fillMaxSize(),
+        Modifier.fillMaxSize().paneDepth(reveal, pane.isFull()), // 1.0.2: the player sinks back under the pane
         background = c.background,
         content = {
-            AuraBackground(t.artUrl)
+            AuraBackground(t.artUrl, motion = motionShowing && canvas == null)
             if (canvas != null) {
-                CanvasVideo(canvas, Modifier.fillMaxSize())
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.30f), Color.Transparent, Color.Black.copy(alpha = 0.50f)))))
+                CanvasVideo(canvas, Modifier.fillMaxSize(), visible = { progress() > 0.3f && !pane.isFull() }) // 1.0.8: pauses while hidden, recovers on return
+                val canvasScrim = remember { Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.30f), Color.Transparent, Color.Black.copy(alpha = 0.50f))) } // 1.0.5: remembered
+                Box(Modifier.fillMaxSize().background(canvasScrim))
             }
         },
         overlay = {
             Column(
                 Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
-                    .playerVerticalGestures(enabled = pane == null, onDrag = onDrag, onDragEnd = onDragEnd, onSwipeUp = { pane = lastFull }), // 1.0.1: swipe up = full-screen pane
+                    .playerVerticalGestures(enabled = pane == null, onDrag = onDrag, onDragEnd = onDragEnd, onSwipeUp = { pane = lastFull }, reveal = reveal), // 1.0.1: swipe up = full-screen pane
             ) {
                 AuraTopBar(onCollapse, onMore = { Menus.track = t })
                 if (landscape) {
                     Row(Modifier.weight(1f).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                        AuraCover(t.artUrl, coverVisible && !canvasOn, onCoverBounds, Modifier.fillMaxHeight().weight(1f), reflection = false)
+                        if (motionOn) LiveLyricsStage(Modifier.fillMaxHeight().weight(1f), onOpenLyrics = { pane = Pane.LYRICS }, onActive = { motionBg = it }, onVideo = canvasOn) {
+                            AuraCover(t.artUrl, coverVisible && !canvasOn, onCoverBounds, Modifier.fillMaxSize(), reflection = false)
+                        }
+                        else AuraCover(t.artUrl, coverVisible && !canvasOn, onCoverBounds, Modifier.fillMaxHeight().weight(1f), reflection = false)
                         Spacer(Modifier.width(20.dp))
                         AnimatedContent(pane.inPlayer(), transitionSpec = { MotionSpec.fadeThrough(still) }, label = "auraLand", modifier = Modifier.weight(1.2f).fillMaxHeight()) { p ->
                             if (p == null) Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
-                                AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = onOpenEq, onPane = { pane = it }, openPane = pane)
+                                AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = { soundSheet = true }, onPane = { pane = it }, openPane = pane, hideCapsule = motionShowing)
                             } else AuraPaneCard(p, t, onCollapse, onNavigate)
                         }
                     }
@@ -180,12 +202,16 @@ fun AuraPlayerScreen(
                         }
                     }, label = "auraPane", modifier = Modifier.weight(1f)) { p ->
                         if (p == null) Column(Modifier.fillMaxSize()) {
-                            val coverA by animateFloatAsState(if (canvasOn) 0f else 1f, if (still) snap() else tween(900), label = "auraCoverAside")
-                            AuraCover(t.artUrl, coverVisible, onCoverBounds,
-                                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 28.dp, vertical = 6.dp)
-                                    .graphicsLayer { alpha = coverA; scaleX = 0.82f + 0.18f * coverA; scaleY = 0.82f + 0.18f * coverA },
-                                reflection = true)
-                            AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = onOpenEq, onPane = { pane = it }, openPane = null,
+                            val coverA by animateFloatAsState(if (canvasOn) 0f else 1f, if (still) snap() else tween(500), label = "auraCoverAside")
+                            val coverLook = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
+                                .graphicsLayer { alpha = coverA; scaleX = 0.82f + 0.18f * coverA; scaleY = 0.82f + 0.18f * coverA }
+                            // 1.0.8: Motion Lyrics play over the artwork (which always stays; alone for songs without
+                            // synced lyrics and while they load).
+                            if (motionOn) LiveLyricsStage(Modifier.weight(1f).fillMaxWidth(), onOpenLyrics = { pane = Pane.LYRICS }, onActive = { motionBg = it }, onVideo = canvasOn) {
+                                AuraCover(t.artUrl, coverVisible, onCoverBounds, Modifier.fillMaxSize().then(coverLook), reflection = true)
+                            }
+                            else AuraCover(t.artUrl, coverVisible, onCoverBounds, Modifier.weight(1f).fillMaxWidth().then(coverLook), reflection = true)
+                            AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = { soundSheet = true }, onPane = { pane = it }, openPane = null, hideCapsule = motionShowing,
                                 modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 8.dp))
                         } else Column(Modifier.fillMaxSize()) {
                             AuraMiniHeader(onClose = { pane = null })
@@ -198,38 +224,58 @@ fun AuraPlayerScreen(
         },
     )
     // 1.0.1: Queue / Lyrics open full screen over the player (pager + tabs, swipe down or Back to close).
-    FullScreenPane(pane, onSelect = { pane = it }, onClose = { pane = null })
+    FullScreenPane(pane, onSelect = { pane = it }, onClose = { pane = null }, reveal = reveal, onNavigate = { pane = null; onCollapse(); onNavigate(it) })
     SleepSheet(sleepSheet) { sleepSheet = false }
+    com.ravi.musicspot.ui.settings.SoundSheet(soundSheet) { soundSheet = false }
 }
 
 /** The artwork's palette as three soft orbs that drift very slowly (40 s loop) over a blurred artwork wash. */
 @Composable
-private fun AuraBackground(url: String?) {
+private fun AuraBackground(url: String?, motion: Boolean = false) {
     val ctx = LocalContext.current
     val c = MaterialTheme.colorScheme
     val still = reducedMotion()
     var colors by remember { mutableStateOf<Pair<Color, Color>?>(null) }
     LaunchedEffect(url) { colors = runCatching { com.ravi.musicspot.ui.theme.artPalette(ctx, url) }.getOrNull() ?: colors }
-    val spec = if (still) snap<Color>() else tween(1600)
+    val spec = if (still) snap<Color>() else tween(900) // 1.0.8: was 1600
     val a by animateColorAsState(colors?.first ?: c.primaryContainer, spec, label = "auraA")
     val b by animateColorAsState(colors?.second ?: c.secondaryContainer, spec, label = "auraB")
     val p3 = c.primary
     // v2.0.14: unconditional loop (was rememberInfiniteTransition inside an if); 0..1 linear restart over 40s.
-    val auraLoop by com.ravi.musicspot.ui.motion.rememberLoopPhase(running = !still, periodMs = 40_000, reverse = false)
-    val phase = if (still) 0.25f else auraLoop
-    val blurOk = android.os.Build.VERSION.SDK_INT >= 31 && !com.ravi.musicspot.Graph.liteFx // 1.0.1
+    // 1.0.2: the loop is read only while drawing (no recomposition per frame) and is off on lite devices, where a
+    // moving background made every glass control above it re-blur on every frame.
+    val drifting = !still && !com.ravi.musicspot.Graph.liteFx
+    val auraLoop = com.ravi.musicspot.ui.motion.rememberLoopPhase(running = drifting, periodMs = 40_000, reverse = false)
     Box(Modifier.fillMaxSize().background(c.background))
-    Artwork(url, Modifier.fillMaxSize().then(if (blurOk) Modifier.blur(72.dp) else Modifier)
-        .graphicsLayer { alpha = if (blurOk) 0.38f else 0.12f; scaleX = 1.35f; scaleY = 1.35f }, RectangleShape)
-    Box(Modifier.fillMaxSize().drawBehind {
+    // 1.0.2: SoftArt replaces the full-screen Modifier.blur (same wash, much cheaper, every Android version).
+    // 1.0.8 Motion Lyrics: the same cheap blurred art becomes the full-screen backdrop (stronger, less zoomed) with a
+    // dark wash so the white lyrics read on any cover; glides in/out. Read only in the draw phase (no recomposition).
+    val m by animateFloatAsState(if (motion) 1f else 0f, if (still) snap<Float>() else tween(520), label = "auraMotion")
+    com.ravi.musicspot.ui.components.SoftArt(url, Modifier.fillMaxSize().clipToBounds().graphicsLayer {
+        alpha = 0.38f + 0.57f * m; val s = 1.35f - 0.17f * m; scaleX = s; scaleY = s
+    })
+    // 1.0.5: the orbs used to allocate three radial Brushes (+ colour lists + shaders) and a vertical Brush on every
+    // frame of the 40 s drift. Each orb's gradient is now built once per size / colour, centred on the origin, and the
+    // canvas is translated to the orb's moving centre, which draws exactly radialGradient(center = (cx, cy)). The
+    // palette colours a / b are read inside the cache block, so a colour glide rebuilds the cache without recomposing.
+    val bgColor = c.background
+    Box(Modifier.fillMaxSize().drawWithCache {
         val w = size.width; val h = size.height
-        val tau = (Math.PI * 2).toFloat()
-        fun orb(col: Color, cx: Float, cy: Float, r: Float) = drawCircle(Brush.radialGradient(listOf(col, Color.Transparent), center = Offset(cx, cy), radius = r), r, Offset(cx, cy))
-        val t = phase * tau
-        orb(a.copy(alpha = 0.55f), w * (0.30f + 0.18f * kotlin.math.cos(t)), h * (0.25f + 0.10f * kotlin.math.sin(t)), w * 0.85f)
-        orb(b.copy(alpha = 0.50f), w * (0.75f + 0.15f * kotlin.math.sin(t * 1f + 1.7f)), h * (0.55f + 0.12f * kotlin.math.cos(t + 0.6f)), w * 0.8f)
-        orb(p3.copy(alpha = 0.22f), w * (0.45f + 0.2f * kotlin.math.sin(t + 3.1f)), h * (0.85f + 0.06f * kotlin.math.cos(t + 2.2f)), w * 0.7f)
-        drawRect(Brush.verticalGradient(listOf(Color.Transparent, c.background.copy(alpha = 0.55f)), startY = h * 0.5f, endY = h))
+        val r1 = w * 0.85f; val r2 = w * 0.8f; val r3 = w * 0.7f
+        val orb1 = Brush.radialGradient(listOf(a.copy(alpha = 0.55f), Color.Transparent), center = Offset.Zero, radius = r1)
+        val orb2 = Brush.radialGradient(listOf(b.copy(alpha = 0.50f), Color.Transparent), center = Offset.Zero, radius = r2)
+        val orb3 = Brush.radialGradient(listOf(p3.copy(alpha = 0.22f), Color.Transparent), center = Offset.Zero, radius = r3)
+        val fade = Brush.verticalGradient(listOf(Color.Transparent, bgColor.copy(alpha = 0.55f)), startY = h * 0.5f, endY = h)
+        onDrawBehind {
+            val phase = if (drifting) auraLoop.value else 0.25f
+            val tau = (Math.PI * 2).toFloat()
+            val t = phase * tau
+            translate(w * (0.30f + 0.18f * kotlin.math.cos(t)), h * (0.25f + 0.10f * kotlin.math.sin(t))) { drawCircle(orb1, r1, Offset.Zero) }
+            translate(w * (0.75f + 0.15f * kotlin.math.sin(t * 1f + 1.7f)), h * (0.55f + 0.12f * kotlin.math.cos(t + 0.6f))) { drawCircle(orb2, r2, Offset.Zero) }
+            translate(w * (0.45f + 0.2f * kotlin.math.sin(t + 3.1f)), h * (0.85f + 0.06f * kotlin.math.cos(t + 2.2f))) { drawCircle(orb3, r3, Offset.Zero) }
+            drawRect(fade)
+            if (m > 0f) drawRect(Color.Black.copy(alpha = 0.34f * m))
+        }
     })
 }
 
@@ -264,10 +310,12 @@ private fun AuraCover(url: String?, visible: Boolean, onBounds: (Rect) -> Unit, 
     val still = reducedMotion()
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
-    val scale by animateFloatAsState(if (st.playing) 1f else 0.86f, if (still) snap() else spring(dampingRatio = 0.75f, stiffness = 70f), label = "auraScale")
+    val scale by animateFloatAsState(if (st.playing) 1f else 0.86f, if (still) snap() else spring(dampingRatio = 0.78f, stiffness = 170f), label = "auraScale") // 1.0.8: was 70
     // v2.0.14: unconditional loop; 0..1 ping-pong over 4.2s (tween default easing).
-    val breatheLoop by com.ravi.musicspot.ui.motion.rememberLoopPhase(running = !still && st.playing, periodMs = 4200, easing = androidx.compose.animation.core.FastOutSlowInEasing)
-    val breathe = if (still || !st.playing) 0f else breatheLoop
+    // 1.0.5: the breathing phase was read here (`by` + breathe in composition), recomposing the whole cover (artwork,
+    // reflection, gestures) every frame while playing. It is now read only inside the two graphicsLayers below.
+    val breatheLoop = com.ravi.musicspot.ui.motion.rememberLoopPhase(running = !still && st.playing, periodMs = 4200, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+    val breathing = !(still || !st.playing)
     val dx = remember { Animatable(0f) }
     val heart = remember { Animatable(0f) }
     val glow = MaterialTheme.colorScheme.primary
@@ -276,8 +324,9 @@ private fun AuraCover(url: String?, visible: Boolean, onBounds: (Rect) -> Unit, 
         val sidePx = with(LocalDensity.current) { side.toPx() }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(contentAlignment = Alignment.Center) {
-                Box(Modifier.size(side).graphicsLayer { val s = (1.12f + 0.04f * breathe) * scale; scaleX = s; scaleY = s; alpha = if (visible) 0.7f else 0f }
-                    .background(Brush.radialGradient(listOf(glow.copy(alpha = 0.40f), Color.Transparent))))
+                val halo = remember(glow) { Brush.radialGradient(listOf(glow.copy(alpha = 0.40f), Color.Transparent)) } // 1.0.5: remembered
+                Box(Modifier.size(side).graphicsLayer { val breathe = if (breathing) breatheLoop.value else 0f; val s = (1.12f + 0.04f * breathe) * scale; scaleX = s; scaleY = s; alpha = if (visible) 0.7f else 0f }
+                    .background(halo))
                 Artwork(url, Modifier.size(side).onGloballyPositioned { onBounds(it.boundsInRoot()) }
                     .pointerInput(sidePx) { // v2.0.14: keyed on sidePx
                         detectHorizontalDragGestures(
@@ -286,14 +335,14 @@ private fun AuraCover(url: String?, visible: Boolean, onBounds: (Rect) -> Unit, 
                                 scope.launch {
                                     if (kotlin.math.abs(v) > sidePx * 0.28f) {
                                         haptics.click()
-                                        dx.animateTo(if (v < 0) -sidePx * 1.2f else sidePx * 1.2f, tween(320, easing = MotionSpec.emphasizedAccelerate))
+                                        dx.animateTo(if (v < 0) -sidePx * 1.2f else sidePx * 1.2f, tween(220, easing = MotionSpec.emphasizedAccelerate))
                                         if (v < 0) Graph.player.next() else Graph.player.previous()
                                         dx.snapTo(if (v < 0) sidePx * 0.7f else -sidePx * 0.7f)
                                     }
-                                    dx.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 90f))
+                                    dx.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 220f))
                                 }
                             },
-                            onDragCancel = { scope.launch { dx.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 90f)) } },
+                            onDragCancel = { scope.launch { dx.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 220f)) } },
                         ) { ch, amount -> ch.consume(); scope.launch { dx.snapTo(dx.value + amount) } }
                     }
                     .pointerInput(st.current?.id) {
@@ -302,7 +351,7 @@ private fun AuraCover(url: String?, visible: Boolean, onBounds: (Rect) -> Unit, 
                                 val tr = st.current ?: return@detectTapGestures
                                 haptics.confirm()
                                 if (Graph.library.data.value.liked.none { it.id == tr.id }) Graph.library.setLiked(tr, true)
-                                scope.launch { heart.snapTo(0f); heart.animateTo(1f, tween(1100)); heart.snapTo(0f) }
+                                scope.launch { heart.snapTo(0f); heart.animateTo(1f, tween(800)); heart.snapTo(0f) }
                             },
                             onLongPress = { st.current?.let { haptics.confirm(); Menus.track = it } },
                         )
@@ -310,13 +359,16 @@ private fun AuraCover(url: String?, visible: Boolean, onBounds: (Rect) -> Unit, 
                     .graphicsLayer {
                         val f = (if (sidePx > 0f) dx.value / sidePx else 0f).coerceIn(-1f, 1f) // v2.0.14
                         translationX = dx.value; rotationY = -f * 22f; cameraDistance = 14f * density
+                        val breathe = if (breathing) breatheLoop.value else 0f // 1.0.5: read in the layer only
                         val s = scale * (1f + 0.015f * breathe) * (1f - 0.1f * kotlin.math.abs(f))
                         scaleX = s; scaleY = s; alpha = if (visible) 1f - 0.45f * kotlin.math.abs(f) else 0f
-                        shadowElevation = (if (st.playing) 30 else 8).dp.toPx(); shape = ART; clip = true
+                        shadowElevation = (if (st.playing) 18 else 6).dp.toPx(); shape = ART; clip = true // 1.0.8 lighter: was 30/8 dp
                         spotShadowColor = glow; ambientShadowColor = glow
                     }, ART, "Album art. Swipe for next or previous, double-tap to like, long-press for options")
-                val h = heart.value
-                if (h > 0f) Icon(Icons.Rounded.Favorite, null, Modifier.size(side / 3).graphicsLayer {
+                // 1.0.5: only "showing or not" is observed in composition; the burst value is read in the layer.
+                val heartOn by remember { androidx.compose.runtime.derivedStateOf { heart.value > 0f } }
+                if (heartOn) Icon(Icons.Rounded.Favorite, null, Modifier.size(side / 3).graphicsLayer {
+                    val h = heart.value
                     val pop = if (h < 0.3f) h / 0.3f * 1.2f else 1.2f - 0.2f * ((h - 0.3f) / 0.7f)
                     scaleX = pop; scaleY = pop; alpha = if (h < 0.7f) 1f else 1f - (h - 0.7f) / 0.3f
                 }, tint = Color.White)
@@ -326,7 +378,9 @@ private fun AuraCover(url: String?, visible: Boolean, onBounds: (Rect) -> Unit, 
                 Box(Modifier.size(side, side * 0.16f).clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
                     .graphicsLayer { alpha = if (visible) 0.22f * scale else 0f; translationX = dx.value }) {
                     Artwork(url, Modifier.size(side).graphicsLayer { scaleY = -1f; translationY = -side.toPx() * 0.84f }, RectangleShape)
-                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.background))))
+                    val bgC = MaterialTheme.colorScheme.background
+                    val mirrorFade = remember(bgC) { Brush.verticalGradient(listOf(Color.Transparent, bgC)) } // 1.0.5: remembered
+                    Box(Modifier.fillMaxSize().background(mirrorFade))
                 }
             }
         }
@@ -335,7 +389,7 @@ private fun AuraCover(url: String?, visible: Boolean, onBounds: (Rect) -> Unit, 
 
 /** The liquid-glass control deck. */
 @Composable
-private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pane) -> Unit, openPane: Pane?, modifier: Modifier = Modifier) {
+private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pane) -> Unit, openPane: Pane?, modifier: Modifier = Modifier, hideCapsule: Boolean = false) {
     val st by Graph.player.state.collectAsState()
     // v2.0.14b: position is collected inside AuraSeekBar so the deck doesn't recompose 4x/sec.
     val lib by Graph.library.data.collectAsState()
@@ -352,7 +406,9 @@ private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pan
             AnimatedContent(st.index to t, modifier = Modifier.weight(1f), label = "auraTitle", contentKey = { it.second.id },
                 transitionSpec = { MotionSpec.sharedAxisX(forward = targetState.first >= initialState.first, still = still) }) { (_, tt) ->
                 Column(Modifier.fillMaxWidth()) {
-                    Text(tt.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    com.ravi.musicspot.ui.components.TitleWithLossless(tt.id) { m -> // 1.0.7: glowing "LOSSLESS" by the name
+                        Text(tt.title, m, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                     Text(tt.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -365,7 +421,8 @@ private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pan
                 }
             }
         }
-        if (openPane == null) LyricsCapsule(onOpen = { onPane(Pane.LYRICS) }, modifier = Modifier.padding(top = 6.dp))
+        // 1.0.8: hidden only while Motion Lyrics are actually on screen (Canvas songs and songs without synced lyrics keep it).
+        if (openPane == null && !hideCapsule) LyricsCapsule(onOpen = { onPane(Pane.LYRICS) }, modifier = Modifier.padding(top = 6.dp))
         if (err != null) Text("Couldn't play · tap Retry in ⋯ or skip", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error,
             modifier = Modifier.padding(top = 4.dp).clickable { Graph.player.retry() }, maxLines = 1)
         Spacer(Modifier.height(6.dp))
@@ -385,20 +442,7 @@ private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pan
                 .clickable(prevI, null, onClickLabel = "Previous") { haptics.click(); Graph.player.previous() }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.SkipPrevious, "Previous", Modifier.size(32.dp))
             }
-            // Play: squircle while playing, circle when paused (M3 expressive shape morph), glowing in the song colour.
-            val corner by animateFloatAsState(if (st.playing) 30f else 50f, if (still) snap() else spring(dampingRatio = 0.55f, stiffness = 150f), label = "auraPlayMorph")
-            val size by animateDpAsState(if (st.playing) 64.dp else 60.dp, if (still) snap() else spring(dampingRatio = 0.6f, stiffness = 150f), label = "auraPlaySize")
-            Box(contentAlignment = Alignment.Center) {
-                val shape = RoundedCornerShape(corner.toInt().coerceIn(0, 50))
-                Box(Modifier.size(size).pressScale(playI, 0.9f)
-                    .graphicsLayer { shadowElevation = (if (st.playing) 24 else 10).dp.toPx(); this.shape = shape; clip = true; spotShadowColor = primary; ambientShadowColor = primary }
-                    .background(Brush.verticalGradient(listOf(primary, androidx.compose.ui.graphics.lerp(primary, Color.Black, 0.18f))))
-                    .clickable(playI, null, onClickLabel = if (st.playing) "Pause" else "Play") { haptics.click(); Graph.player.toggle() }, contentAlignment = Alignment.Center) {
-                    val onP = if ((primary.red * 0.299f + primary.green * 0.587f + primary.blue * 0.114f) > 0.6f) Color.Black else Color.White
-                    com.ravi.musicspot.ui.motion.PlayPauseIcon(st.playing, Modifier.size(32.dp), tint = onP)
-                }
-                if (st.buffering) CircularProgressIndicator(Modifier.size(size + 6.dp), strokeWidth = 2.dp)
-            }
+            AuraPlayButton(st.playing, st.buffering, still, playI, primary, haptics) // 1.0.5: own scope, see AuraPlayButton
             Box(Modifier.size(50.dp).graphicsLayer { translationX = nextX.dp.toPx() }.pressScale(nextI, 0.86f).clip(CircleShape)
                 .clickable(nextI, null, onClickLabel = "Next") { haptics.click(); Graph.player.next() }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.SkipNext, "Next", Modifier.size(32.dp))
@@ -411,27 +455,54 @@ private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pan
         val sleepOn = sleepTick >= 0 && Graph.player.sleepActive
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             AuraChip(Icons.Rounded.Lyrics, "Lyrics", openPane == Pane.LYRICS) { onPane(Pane.LYRICS) }
-            AuraChip(Icons.AutoMirrored.Rounded.QueueMusic, "Up next", openPane == Pane.QUEUE) { onPane(Pane.QUEUE) }
+            AuraChip(Icons.AutoMirrored.Rounded.PlaylistPlay, "Up next", openPane == Pane.QUEUE) { onPane(Pane.QUEUE) }
+            // 1.0.7: Related (and Credits, via the pane switcher) lost their entry point when Queue/Lyrics went full screen.
+            AuraChip(Icons.Rounded.Explore, "Related", openPane == Pane.RELATED) { onPane(Pane.RELATED) }
             AuraChip(Icons.Rounded.Bedtime, if (sleepOn) sleepLabelPublic() else "Sleep", sleepOn) { onOpenSleep() }
             AuraChip(Icons.Rounded.Equalizer, if (engine.eqActive) "EQ on" else "Sound", engine.eqActive) { onOpenEq() }
         }
     }
 }
 
+/**
+ * 1.0.5: the deck's play button, moved out of AuraDeck unchanged. Its corner and size springs are read in composition
+ * (shape, size), so they used to recompose the whole glass deck for every frame of the morph; now only this button.
+ */
+@Composable
+private fun AuraPlayButton(playing: Boolean, buffering: Boolean, still: Boolean, playI: MutableInteractionSource, primary: Color, haptics: com.ravi.musicspot.ui.motion.Haptics) {
+    // Play: squircle while playing, circle when paused (M3 expressive shape morph), glowing in the song colour.
+    val corner by animateFloatAsState(if (playing) 30f else 50f, if (still) snap() else spring(dampingRatio = 0.6f, stiffness = 320f), label = "auraPlayMorph")
+    val size by animateDpAsState(if (playing) 64.dp else 60.dp, if (still) snap() else spring(dampingRatio = 0.65f, stiffness = 320f), label = "auraPlaySize")
+    Box(contentAlignment = Alignment.Center) {
+        val shape = RoundedCornerShape(corner.toInt().coerceIn(0, 50))
+        val playFill = remember(primary) { Brush.verticalGradient(listOf(primary, androidx.compose.ui.graphics.lerp(primary, Color.Black, 0.18f))) } // 1.0.5: remembered
+        Box(Modifier.size(size).pressScale(playI, 0.9f)
+            .graphicsLayer { shadowElevation = (if (playing) 24 else 10).dp.toPx(); this.shape = shape; clip = true; spotShadowColor = primary; ambientShadowColor = primary }
+            .background(playFill)
+            .clickable(playI, null, onClickLabel = if (playing) "Pause" else "Play") { haptics.click(); Graph.player.toggle() }, contentAlignment = Alignment.Center) {
+            val onP = if ((primary.red * 0.299f + primary.green * 0.587f + primary.blue * 0.114f) > 0.6f) Color.Black else Color.White
+            com.ravi.musicspot.ui.motion.PlayPauseIcon(playing, Modifier.size(32.dp), tint = onP)
+        }
+        if (buffering) CircularProgressIndicator(Modifier.size(size + 6.dp), strokeWidth = 2.dp)
+    }
+}
+
 /** Thick expressive seek bar: 6 dp at rest, swelling to 14 dp while touched, with a glowing played part. */
 @Composable
 private fun AuraSeekBar(durationMs: Long) {
-    val pos by Graph.player.position.collectAsState() // v2.0.14b: collected here, not in AuraDeck
+    // 1.0.5: position is no longer read in this body (which owns the gestures); the fill and the times read it in
+    // their own leaf scopes, so a tick re-lays out only the played part and re-composes only the time texts.
+    val posState = Graph.player.position.collectAsState() // v2.0.14b: collected here, not in AuraDeck
     val still = reducedMotion()
     val dur = durationMs.coerceAtLeast(1)
     var scrub by remember { mutableFloatStateOf(-1f) }
     var widthPx by remember { mutableFloatStateOf(1f) }
     val active = scrub >= 0f
-    val h by animateDpAsState(if (active) 12.dp else 5.dp, if (still) snap() else spring(dampingRatio = 0.6f, stiffness = 180f), label = "auraSeekH")
-    val frac = if (active) scrub else (pos.toFloat() / dur).coerceIn(0f, 1f)
+    val h by animateDpAsState(if (active) 12.dp else 5.dp, if (still) snap() else spring(dampingRatio = 0.7f, stiffness = 380f), label = "auraSeekH")
+    val fracOf: () -> Float = { if (scrub >= 0f) scrub else (posState.value.toFloat() / dur).coerceIn(0f, 1f) } // 1.0.5
     // v2.0.14: dragging flag keeps tap-release from resetting scrub mid-drag; live fraction/duration via rememberUpdatedState.
     var dragging by remember { mutableStateOf(false) }
-    val fracNow by androidx.compose.runtime.rememberUpdatedState(frac)
+    val fracNow by androidx.compose.runtime.rememberUpdatedState(fracOf)
     val durNow by androidx.compose.runtime.rememberUpdatedState(durationMs)
     fun seekTo(f: Float) { val d = durNow; if (d > 0) Graph.player.seek((f * d).toLong().coerceIn(0L, d)) }
     val primary = MaterialTheme.colorScheme.primary
@@ -447,19 +518,35 @@ private fun AuraSeekBar(durationMs: Long) {
                     onDragStart = { o -> dragging = true; scrub = (o.x / widthPx).coerceIn(0f, 1f) },
                     onDragEnd = { if (scrub >= 0f) seekTo(scrub); scrub = -1f; dragging = false },
                     onDragCancel = { scrub = -1f; dragging = false },
-                ) { ch, amount -> ch.consume(); scrub = ((if (scrub < 0f) fracNow else scrub) + amount / widthPx).coerceIn(0f, 1f) }
+                ) { ch, amount -> ch.consume(); scrub = ((if (scrub < 0f) fracNow() else scrub) + amount / widthPx).coerceIn(0f, 1f) }
             }, contentAlignment = Alignment.CenterStart) {
+            val played = remember(primary) { Brush.horizontalGradient(listOf(primary.copy(alpha = 0.75f), primary)) } // 1.0.5: remembered
             Box(Modifier.fillMaxWidth().height(h).clip(PILL).background(track)) {
-                Box(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(PILL)
-                    .background(Brush.horizontalGradient(listOf(primary.copy(alpha = 0.75f), primary))))
+                AuraSeekFill(fracOf, played) // 1.0.5: leaf
             }
         }
         Row(Modifier.fillMaxWidth()) {
-            Text(formatTime(if (active) (scrub * dur).toLong() else pos), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // 1.0.5: leaf texts; same strings as before.
+            PlayerTickText({ formatTime(if (scrub >= 0f) (scrub * dur).toLong() else posState.value) }, MaterialTheme.typography.labelSmall, MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
-            Text("-" + formatTime((durationMs - (if (active) (scrub * dur).toLong() else pos)).coerceAtLeast(0)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            PlayerTickText({ "-" + formatTime((durationMs - (if (scrub >= 0f) (scrub * dur).toLong() else posState.value)).coerceAtLeast(0)) }, MaterialTheme.typography.labelSmall, MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** 1.0.5: the played part of the seek bar in its own scope (same Box as before); [fracOf] is read only here. */
+@Composable
+private fun AuraSeekFill(fracOf: () -> Float, brush: Brush) {
+    // 1.0.7: the played part is drawn, not laid out. fracOf() is read only inside the draw lambda, so a position tick
+    // (or a scrub frame) invalidates this one draw node: no recomposition, no measure/layout of the seek bar.
+    // inset() narrows the DrawScope to the played width, so the gradient spans the played part exactly as the old
+    // fillMaxWidth(frac) Box did, with the same pill ends (radius = half the height).
+    Box(Modifier.fillMaxSize().drawBehind {
+        val w = size.width * fracOf().coerceIn(0f, 1f)
+        if (w > 0f) inset(0f, 0f, size.width - w, 0f) {
+            drawRoundRect(brush, cornerRadius = CornerRadius(size.height / 2f, size.height / 2f))
+        }
+    })
 }
 
 @Composable
@@ -494,7 +581,7 @@ private fun AuraChip(icon: ImageVector, label: String, active: Boolean, onClick:
 }
 
 private fun Modifier.animateContentSizeSafe(still: Boolean): Modifier =
-    if (still) this else this.then(Modifier.animateContentSize(spring(dampingRatio = 0.8f, stiffness = 160f)))
+    if (still) this else this.then(Modifier.animateContentSize(spring(dampingRatio = 0.85f, stiffness = 380f)))
 
 @Composable
 private fun AuraMiniHeader(onClose: () -> Unit) {
@@ -512,7 +599,9 @@ private fun AuraMiniHeader(onClose: () -> Unit) {
             Spacer(Modifier.width(10.dp))
             AnimatedContent(t, contentKey = { it.id }, transitionSpec = { MotionSpec.sharedAxisX(true, still) }, label = "auraHdr", modifier = Modifier.weight(1f)) { tt ->
                 Column {
-                    Text(tt.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    com.ravi.musicspot.ui.components.TitleWithLossless(tt.id) { m ->
+                        Text(tt.title, m, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                     Text(tt.artist, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -535,13 +624,16 @@ private fun AuraMiniHeader(onClose: () -> Unit) {
 /** v2.0.14b: hairline progress of the mini header; the only place that reads position, so only it recomposes. */
 @Composable
 private fun AuraMiniProgress(durationMs: Long, modifier: Modifier = Modifier) {
-    val pos by Graph.player.position.collectAsState()
+    // 1.0.7: the position State is read only in the draw lambda (was read in composition + fillMaxWidth(frac), i.e. a
+    // recomposition and a re-layout 4x a second). Same hairline, same pill ends, same colours.
+    val posState = Graph.player.position.collectAsState()
     val primary = MaterialTheme.colorScheme.primary
-    val frac = if (durationMs > 0) (pos.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     Box(modifier.padding(horizontal = 18.dp).fillMaxWidth().height(2.dp).clip(PILL)
-        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f))) {
-        Box(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(PILL).background(primary))
-    }
+        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f))
+        .drawBehind {
+            val frac = if (durationMs > 0) (posState.value.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+            if (frac > 0f) drawRoundRect(primary, size = Size(size.width * frac, size.height), cornerRadius = CornerRadius(size.height / 2f, size.height / 2f))
+        })
 }
 
 @Composable
@@ -575,14 +667,15 @@ private fun AuraPaneSwitcher(open: Pane, onSelect: (Pane) -> Unit, onClose: () -
         Row(Modifier.weight(1f).fillMaxHeight().liquidGlass(PILL).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             entries.forEach { e ->
                 val on = e == open
-                val w by animateFloatAsState(if (on) 2.4f else 1f, if (still) snap() else spring(dampingRatio = 0.8f, stiffness = 170f), label = "auraSwW")
+                val w by animateFloatAsState(if (on) 2.4f else 1f, if (still) snap() else spring(dampingRatio = 0.85f, stiffness = 380f), label = "auraSwW")
                 val lens by animateFloatAsState(if (on) 1f else 0f, if (still) snap() else MotionSpec.popSpring(), label = "auraSwLens")
                 val fg by animateColorAsState(if (on) primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f), if (still) snap() else tween(MotionSpec.MEDIUM), label = "auraSwFg")
                 val i = remember { MutableInteractionSource() }
                 Box(Modifier.weight(w).fillMaxHeight().pressScale(i, 0.9f).clip(PILL)
                     .clickable(i, null, onClickLabel = e.label) { if (!on) haptics.tick(); onSelect(e) }, contentAlignment = Alignment.Center) {
+                    val lensFill = remember(primary) { Brush.verticalGradient(listOf(primary.copy(alpha = 0.30f), primary.copy(alpha = 0.12f))) } // 1.0.5: remembered
                     Box(Modifier.fillMaxSize().graphicsLayer { alpha = lens; scaleX = 0.7f + 0.3f * lens; scaleY = 0.8f + 0.2f * lens }.clip(PILL)
-                        .background(Brush.verticalGradient(listOf(primary.copy(alpha = 0.30f), primary.copy(alpha = 0.12f)))))
+                        .background(lensFill))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(e.icon, e.label, Modifier.size(19.dp), tint = fg)
                         if (on) {

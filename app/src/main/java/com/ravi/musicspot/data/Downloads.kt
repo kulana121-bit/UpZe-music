@@ -28,7 +28,8 @@ import kotlinx.coroutines.Dispatchers // v2.0.14:
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.withContext // v2.0.14:
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull // v2.0.14:
 import kotlinx.serialization.Serializable
 import okhttp3.Request
 import java.io.File
@@ -103,6 +104,7 @@ class DownloadsRepo(private val ctx: Context) {
 
     fun delete(id: String) {
         _items.value[id]?.path?.let { File(it).delete() }
+        runCatching { Graph.offlineLyrics.delete(id) } // 1.0.6: its saved lyrics go with it
         File(dir, safe(id) + ".part").delete()
         edit { it - id }
     }
@@ -149,6 +151,10 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             if (part.length() < 1024) throw IOException("Download was empty")
             if (!part.renameTo(out)) throw IOException("Couldn't save the file")
             repo.update(id) { it.copy(state = DownloadEntry.State.DONE, path = out.absolutePath, bytes = out.length(), total = out.length(), info = r.info) }
+            // 1.0.6 offline lyrics: save the song's synced lyrics (and romanization) with the download. Best effort:
+            // a song without lyrics, or a lyrics service that is down, never fails the download itself.
+            try { withTimeoutOrNull(30_000) { Graph.saveOfflineLyrics(t) } }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { com.ravi.musicspot.core.CrashGuard.nonFatal(applicationContext, "offlineLyrics", e) }
             Result.success()
         } catch (e: kotlinx.coroutines.CancellationException) {
             repo.update(id) { it.copy(state = DownloadEntry.State.QUEUED) } // v2.0.14: cancelled/stopped → back to queued

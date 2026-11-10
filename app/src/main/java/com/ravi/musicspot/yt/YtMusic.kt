@@ -153,10 +153,9 @@ class YtMusic(val tube: Innertube, private val resolver: YtStreamResolver, priva
     suspend fun related(videoId: String): List<Shelf> {
         val id = tabBrowseId(tube.next(videoId), "MUSIC_PAGE_TYPE_TRACK_RELATED") ?: return emptyList()
         val r = tube.browse(id)
-        val shelves = mutableListOf<HomeShelf>()
-        walk(r) { o -> (o["musicCarouselShelfRenderer"] as? JsonObject)?.let { _ -> } }
+        // 1.0.7: dropped a no-op full-tree walk and a throwaway list (pure allocation on every Related open).
         return InnertubeParser.parseHomeContinuation(r).ifEmpty { InnertubeParser.parseHome(r) }.map { it.toShelf() }
-            .filter { it.tracks.isNotEmpty() || it.collections.isNotEmpty() }.also { shelves.clear() }
+            .filter { it.tracks.isNotEmpty() || it.collections.isNotEmpty() }
     }
 
     /** YouTube Music's own (plain, unsynced) lyrics, with the provider credit it shows. */
