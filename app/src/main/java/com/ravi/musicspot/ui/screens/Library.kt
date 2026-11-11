@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
@@ -132,6 +133,8 @@ fun LibraryScreen() {
                     val room by com.ravi.musicspot.together.ListenTogether.room.collectAsState()
                     Tile(Icons.Rounded.Groups, "Listen together", room?.let { r -> "In room ${r.code}" + if (r.listeners > 0) " · ${count(r.listeners, "listener")}" else "" } ?: "Play in sync with friends",
                         Modifier.fillMaxWidth().staggerIn(4)) { nav.push(Route.ListenTogether) }
+                    // Pack 5: Your stats (Wrapped anytime), always reachable from Library.
+                    Tile(Icons.Rounded.Insights, "Your stats", "Top songs, artists & streaks", Modifier.fillMaxWidth().staggerIn(5)) { nav.push(Route.Wrapped) }
                 }
             }
 

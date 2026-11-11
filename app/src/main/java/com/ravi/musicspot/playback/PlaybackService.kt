@@ -58,6 +58,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.future.asCompletableFuture
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -168,6 +170,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        LoudnessStore.init(filesDir) // 1.0.10: measured loudness per track (normalisation)
         pure = Graph.settings.value.pureHiRes || Graph.settings.value.bitPerfectUsb
         player = buildPlayer()
         current = this
@@ -193,7 +196,7 @@ class PlaybackService : MediaSessionService() {
             }
             // 1.0.5: the player may only be touched on its application looper; a call from any other thread is posted.
             if (android.os.Looper.myLooper() == player.applicationLooper) { act(); player.mediaItemCount > 0 }
-            else { playerHandler.post { runCatching { act() } }; true }
+            else { playerHandler.post { runCatching { act() }.onFailure { com.ravi.musicspot.core.PlaybackLog.add("Posted player action failed: ${it.javaClass.simpleName}: ${it.message}") } }; true }
         }
         player.addListener(object : Player.Listener {
             override fun onEvents(p: Player, events: Player.Events) {
@@ -379,8 +382,19 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /** 1.0.10: tells the engine's single levelling stage which track plays and its ReplayGain tags (if any). */
+    private fun pushLevelling() {
+        if (!::player.isInitialized) return
+        val id = player.currentMediaItem?.mediaId
+        val tags = runCatching { ReplayGain.fromTracks(player.currentTracks) }.getOrNull()
+        Playback.engine.setTrack(id, tags)
+    }
+
     private val listener = object : Player.Listener {
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) = pushLevelling()
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            pushLevelling()
             val id = mediaItem?.mediaId
             // Resolutions for items that are no longer current or among the next two are cancelled.
             val keep = setOfNotNull(id) + upcoming().map { it.id }
@@ -409,6 +423,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            tickerPlaying.value = isPlaying // 1.0.10: wakes the idle ticker
             val id = player.currentMediaItem?.mediaId
             if (isPlaying) { errorSkips = 0; pausedByMute = false }
             // 1.0.6: playback restarted by a path that doesn't go through the session (error recovery, unmute resume)
@@ -427,6 +442,7 @@ class PlaybackService : MediaSessionService() {
         /** 1.0.5: resuming after a long pause: refresh an expiring URL before the buffer runs out. */
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (playWhenReady) runCatching { refreshStaleUrlOnResume() }
+                .onFailure { com.ravi.musicspot.core.PlaybackLog.add("Resume URL refresh failed: ${it.javaClass.simpleName}: ${it.message}") }
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -459,6 +475,7 @@ class PlaybackService : MediaSessionService() {
             if (id != null) {
                 urlCache.remove(id); resolvedInfo.remove(id)
                 if (refusedUrl != null) runCatching { onRefused(refusedUrl) }
+                    .onFailure { com.ravi.musicspot.core.PlaybackLog.add("Refused-URL handling failed: ${it.javaClass.simpleName}: ${it.message}") }
                 when (replays.onError(id, refusedUrl != null, Graph.online.value)) {
                     com.ravi.musicspot.logic.ReplayPolicy.Decision.REPLAY -> {
                         com.ravi.musicspot.core.PlaybackLog.add("Automatic replay ${replays.replays(id)}/${com.ravi.musicspot.logic.ReplayPolicy.MAX_AUTO_REPLAYS}")
@@ -856,12 +873,24 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /** 1.0.10: mirrors player.isPlaying for the ticker's idle wait. */
+    private val tickerPlaying = MutableStateFlow(false)
+
     private suspend fun ticker() {
         var lastSaveAt = System.currentTimeMillis()
         var fine = false
         while (scope.isActive) {
-            // 1.0.6: 40 ms steps while a crossfade/fade-in shapes the volume (smooth equal-power curve), 200 ms otherwise.
-            delay(if (fine) 40 else 200)
+            // 1.0.10: the 200 ms (40 ms while fading) cadence runs only while playing or while a sleep timer is set (its
+            // countdown label and fade). Paused/idle: wait for playback to start or a sleep timer to be set, with a
+            // 30 s heartbeat; the body then runs straight away, so nothing lags on resume.
+            if (player.isPlaying || Playback.sleep.mode != SleepTimer.Mode.OFF) delay(if (fine) 40 else 200)
+            else {
+                val sleepAt = Playback.sleepTick.value
+                kotlinx.coroutines.withTimeoutOrNull(IDLE_HEARTBEAT_MS) {
+                    kotlinx.coroutines.flow.merge(tickerPlaying.filter { it }, Playback.sleepTick.filter { it != sleepAt }).first()
+                }
+                fine = false
+            }
             val s = Graph.settings.value
             val now = System.currentTimeMillis()
             val dur = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
@@ -1049,6 +1078,8 @@ class PlaybackService : MediaSessionService() {
         @Volatile internal var cacheEnabled = true
         internal const val MAX_ERROR_SKIPS = 5
         internal const val FADE_IN_MS = 600L
+        /** 1.0.10: ticker heartbeat while paused/idle with no sleep timer (was a 200 ms loop at all times). */
+        internal const val IDLE_HEARTBEAT_MS = 30_000L
         /** 1.0.6: pre-buffer the next song this long before the current one ends (or at 80 %, whichever is first). */
         internal const val PREBUFFER_BEFORE_END_MS = 20_000L
         /** 1.0.6: the first chunk of the next song written to the media cache ahead of time (~16-30 s of audio). */

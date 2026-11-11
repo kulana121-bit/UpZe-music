@@ -209,3 +209,74 @@ object HomeFeedRepo {
         )
     }
 }
+
+/**
+ * Pack 5 (Nayi Jeet) personalised Home: pure helpers over data the app already keeps on the device (History rows and
+ * PlayStats). No network, no new tracking, no Android. Every row built from these hides itself when it has too
+ * little data, so a listener with no history sees the same Home as before.
+ */
+object HomePersonal {
+    /** Greeting for the local hour (device clock): no name is invented; the caller adds a real account name if any. */
+    fun greeting(hour: Int): String = when (((hour % 24) + 24) % 24) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..21 -> "Good evening"
+        else -> "Late night vibes"
+    }
+
+    /** One "Jump back in" card: the History row plus how long ago it was played. */
+    data class JumpBack(val entry: HistoryEntry, val ago: String)
+
+    /**
+     * "Jump back in": the newest History rows (each song once), minus [skipId] (the song the spotlight already shows),
+     * at most [limit]. Empty when History holds fewer than two songs, the same threshold the old "Recently played"
+     * row used, so a new listener's Home doesn't change.
+     */
+    fun jumpBackIn(history: List<HistoryEntry>, skipId: String?, nowMs: Long, limit: Int = 20): List<JumpBack> {
+        if (history.size < 2) return emptyList()
+        val seen = HashSet<String>()
+        return history.asSequence()
+            .filter { it.track.id != skipId && seen.add(it.track.id) }
+            .take(limit)
+            .map { JumpBack(it, ago(it.atMs, nowMs)) }
+            .toList()
+    }
+
+    /** "Just now", "12 min ago", "3 h ago", "Yesterday", "4 days ago", "3 weeks ago", "Earlier". */
+    fun ago(atMs: Long, nowMs: Long): String {
+        val m = ((nowMs - atMs).coerceAtLeast(0)) / 60_000L
+        return when {
+            m < 2 -> "Just now"
+            m < 60 -> "$m min ago"
+            m < 24 * 60 -> "${m / 60} h ago"
+            m < 48 * 60 -> "Yesterday"
+            m < 7 * 24 * 60 -> "${m / (24 * 60)} days ago"
+            m < 60 * 24 * 60 -> "${m / (7 * 24 * 60)} weeks ago".replace("1 weeks", "1 week")
+            else -> "Earlier"
+        }
+    }
+
+    /** One "Your top artists" bubble: the main artist, their counted plays and their songs, most played first. */
+    data class TopArtist(val name: String, val artistId: String?, val artUrl: String?, val plays: Int, val tracks: List<com.ravi.musicspot.model.Track>)
+
+    /**
+     * "Your top artists" from PlayStats: songs grouped by main artist (ListenStats.mainArtist), ranked by
+     * (plays + 2 × repeats) with Taste's recency decay. An artist needs [minPlays] counted plays; the row is shown only
+     * when at least [minArtists] artists qualify (else empty, and Home hides the row).
+     */
+    fun topArtists(stats: kotlin.collections.Collection<com.ravi.musicspot.logic.PlayStat>, nowMs: Long, minPlays: Int = 3, minArtists: Int = 3, limit: Int = 12): List<TopArtist> {
+        val rows = stats.filter { it.plays > 0 && it.track.artist.isNotBlank() }
+            .groupBy { com.ravi.musicspot.logic.ListenStats.mainArtist(it.track.artist) }
+            .mapNotNull { (name, ss) ->
+                val plays = ss.sumOf { it.plays }
+                if (plays < minPlays) return@mapNotNull null
+                val score = ss.sumOf { (it.plays + 2.0 * it.repeats) * com.ravi.musicspot.logic.Taste.decay(it.lastMs, nowMs) }
+                val songs = ss.sortedWith(compareByDescending<com.ravi.musicspot.logic.PlayStat> { it.plays }.thenBy { it.track.title.lowercase() })
+                val id = songs.firstNotNullOfOrNull { s -> s.track.artistId?.takeIf { it.startsWith("UC") || it.startsWith("yt:") } }
+                TopArtist(name, id, songs.firstNotNullOfOrNull { it.track.artUrl }, plays, songs.map { it.track }.distinctBy { it.id }) to score
+            }
+            .sortedWith(compareByDescending<Pair<TopArtist, Double>> { it.second }.thenBy { it.first.name.lowercase() })
+            .map { it.first }
+        return if (rows.size < minArtists) emptyList() else rows.take(limit)
+    }
+}

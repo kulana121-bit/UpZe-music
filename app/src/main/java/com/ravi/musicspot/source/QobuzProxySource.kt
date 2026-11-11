@@ -1,6 +1,7 @@
 package com.ravi.musicspot.source
 
 import com.ravi.musicspot.core.Http
+import com.ravi.musicspot.core.PlaybackLog
 import com.ravi.musicspot.model.Quality
 import com.ravi.musicspot.model.SourceKind
 import com.ravi.musicspot.model.StreamInfo
@@ -87,12 +88,14 @@ class QobuzProxySource(private val enabled: () -> Boolean) : MusicSource {
             Quality.AUTO -> if (metered) "5" else "6" // 320k MP3 vs 16-bit FLAC
         }
 
-        for (proxy in PROXIES) {
+        for ((i, proxy) in PROXIES.withIndex()) {
             val url = "$proxy/track/url?track_id=$trackId&format_id=$qFormat"
             try {
                 val respStr = Http.getString(url, mapOf("User-Agent" to "UpZe/1.0"))
-                val resp = json.parseToJsonElement(respStr) as? JsonObject ?: continue
-                val streamUrl = (resp["url"] as? JsonPrimitive)?.contentOrNull ?: continue
+                val resp = json.parseToJsonElement(respStr) as? JsonObject
+                if (resp == null) { logFailover(i, "response is not a JSON object"); continue }
+                val streamUrl = (resp["url"] as? JsonPrimitive)?.contentOrNull
+                if (streamUrl == null) { logFailover(i, "no url in response"); continue }
 
                 if (streamUrl.startsWith("http")) {
                     return@withContext Resolved(
@@ -102,13 +105,22 @@ class QobuzProxySource(private val enabled: () -> Boolean) : MusicSource {
                         cacheKey = "${kind.prefix}:$trackId@$qFormat"
                     )
                 }
+                logFailover(i, "stream url is not http(s)")
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // Next proxy
+                logFailover(i, "${e.javaClass.simpleName}: ${e.message}")
             }
         }
         throw SourceUnavailableException("Qobuz: unable to resolve stream for ${track.title}")
+    }
+
+    /** 1.0.10: a proxy failover is logged (from → to, with the reason) instead of passing silently. */
+    private suspend fun logFailover(i: Int, reason: String) {
+        val from = PROXIES[i].substringAfter("://")
+        val to = PROXIES.getOrNull(i + 1)?.substringAfter("://") ?: "none left (source fails)"
+        PlaybackLog.log("Qobuz failover: $from → $to: $reason")
     }
 
     override suspend fun probe(): String {

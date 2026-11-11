@@ -364,6 +364,7 @@ private fun RouteContent(r: Route) {
         Route.Saved -> SavedScreen()
         is Route.SettingsPage -> SettingsPageScreen(r.page)
         is Route.ShelfAll -> com.ravi.musicspot.ui.screens.ShelfAllScreen(r.shelf)
+        Route.Wrapped -> com.ravi.musicspot.ui.screens.WrappedScreen() // Pack 5
         Route.GoogleLogin, Route.SpotifyLogin, Route.Customize, Route.Artists -> Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) // drawn by AppRoot
     }
 }

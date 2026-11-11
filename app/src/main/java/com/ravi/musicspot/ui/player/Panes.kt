@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.AllInclusive
 import androidx.compose.material.icons.rounded.Close
@@ -118,6 +119,10 @@ fun QueuePane() {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp).cascade(clock, 2f), verticalAlignment = Alignment.CenterVertically) {
             Text("Up next · ${(st.queue.size - st.index - 1).coerceAtLeast(0)} songs", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            // 1.0.10: save the whole queue (every track, in order) through the existing Add to playlist dialog.
+            IconButton(onClick = { Menus.addToPlaylist = st.queue.toList() }, enabled = st.queue.isNotEmpty()) {
+                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, "Save queue as playlist")
+            }
             TextButton(onClick = { Graph.player.clearUpcoming() }, enabled = st.index < st.queue.lastIndex) { Text("Clear") }
         }
         // v2.0.5 Infinite play: persisted (AppSettings.autoplay, default on).
@@ -547,6 +552,32 @@ fun SleepSheet(visible: Boolean, onDismiss: () -> Unit) = com.ravi.musicspot.ui.
                 FilterChip(settings.sleepFade, { Graph.settings.update { it.copy(sleepFade = !it.sleepFade) } }, label = { Text("Fade out (last 30 s)") })
                 FilterChip(settings.sleepFinishSong, { Graph.settings.update { it.copy(sleepFinishSong = !it.sleepFinishSong) } }, label = { Text("Finish the song") })
             }
+            Spacer(Modifier.width(1.dp))
+        }
+    }
+}
+
+/** 1.0.10: playback speed (0.5x–2x) and pitch, shown while [visible]. Applies at once; kept for the session. */
+@Composable
+fun SpeedSheet(visible: Boolean, onDismiss: () -> Unit) = com.ravi.musicspot.ui.motion.MotionSheet(if (visible) Unit else null, onDismiss = onDismiss) {
+    val sp by Graph.player.speed.collectAsState()
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+        Column(Modifier.fillMaxWidth().glassSheet(Ms.r28).navigationBarsPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Playback speed · ${com.ravi.musicspot.playback.speedLabel(sp.speed)}", style = MaterialTheme.typography.titleLarge)
+            // 0.05x steps from 0.5x to 2x (30 intervals → 29 inner steps).
+            androidx.compose.material3.Slider(
+                value = sp.speed,
+                onValueChange = { v -> Graph.player.setSpeed(Math.round(v * 20f) / 20f) },
+                valueRange = com.ravi.musicspot.playback.MIN_SPEED..com.ravi.musicspot.playback.MAX_SPEED,
+                steps = 29,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { v ->
+                    FilterChip(sp.speed == v, { Graph.player.setSpeed(v) }, label = { Text(com.ravi.musicspot.playback.speedLabel(v)) })
+                }
+            }
+            FilterChip(sp.keepPitch, { Graph.player.setSpeed(sp.speed, keepPitch = !sp.keepPitch) },
+                label = { Text("Keep natural voice (preserve pitch)") })
             Spacer(Modifier.width(1.dp))
         }
     }

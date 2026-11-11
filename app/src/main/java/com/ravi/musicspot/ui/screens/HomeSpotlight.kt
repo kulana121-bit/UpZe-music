@@ -39,6 +39,8 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -112,7 +114,8 @@ import java.util.Calendar
  *  - a full-bleed spotlight with the current / recent / featured song's artwork edge to edge, fading into the page,
  *    greeting + big title + artist + Play and Shuffle over it (blur only on API 31+);
  *  - round shortcut bubbles (Liked, Downloads, History, On device, Search); outlined mood chips;
- *  - "On repeat" as a numbered top-5 list with Play all; recently played as wide cards;
+ *  - "Jump back in" (History) as wide cards near the top; "On repeat" as a numbered top-5 list with Play all;
+ *  - Pack 5: "Your top artists" (PlayStats) and a "Your stats, anytime" card, each shown only with enough data;
  *  - shelves with large headers and a subtitle line.
  */
 @Composable
@@ -143,12 +146,25 @@ fun SpotlightHomeScreen() {
     LaunchedEffect(online) { if (online && HomeFeedRepo.feed.value?.isEmpty != false) HomeFeedRepo.load(force = true) }
 
     val stats by Graph.playStats.data.collectAsState()
+
     val favourites = com.ravi.musicspot.ui.components.rememberOffMain(stats, lib.liked) { // 1.0.7: recomputed off the main thread
         com.ravi.musicspot.logic.Taste.favourites(stats.stats.values, lib.liked, System.currentTimeMillis()) }
     // 1.0.6 on-device time-of-day mix: songs this listener plays more at this part of the day (no network, no API).
     val todPart = remember(stats) { com.ravi.musicspot.logic.TimeOfDay.partAt(System.currentTimeMillis()) }
     val todPicks = com.ravi.musicspot.ui.components.rememberOffMain(stats, todPart) { com.ravi.musicspot.logic.TimeOfDay.picksFor(stats.stats.values, stats.dayparts, todPart, System.currentTimeMillis()) }
     val recent = remember(lib.history) { lib.history.map { it.track }.distinctBy { it.id }.take(20) }
+    // Pack 5 personalised Home (all on-device, from History + PlayStats; each row hides itself without enough data).
+    // Only the loaded song's id matters here (the whole player state would recompose Home on every player event).
+    val currentIdFlow = remember { Graph.player.state.map { it.current?.id }.distinctUntilChanged() }
+    val currentId by currentIdFlow.collectAsState(initial = Graph.player.state.value.current?.id)
+    val spotlightId = currentId ?: recent.firstOrNull()?.id
+    val jumpBack = com.ravi.musicspot.ui.components.rememberOffMain(lib.history, spotlightId) {
+        com.ravi.musicspot.data.HomePersonal.jumpBackIn(lib.history, spotlightId, System.currentTimeMillis()) }
+    val topArtists = com.ravi.musicspot.ui.components.rememberOffMain(stats) {
+        com.ravi.musicspot.data.HomePersonal.topArtists(stats.stats.values, System.currentTimeMillis()) }
+    val wrappedWeek = com.ravi.musicspot.ui.components.rememberOffMain(stats) {
+        com.ravi.musicspot.logic.Wrapped.summarize(stats, com.ravi.musicspot.logic.Wrapped.Range.WEEK, System.currentTimeMillis()) }
+    val hasAnyPlays = remember(stats) { stats.days.values.any { m -> m.values.any { it > 0 } } || stats.stats.values.any { it.plays > 0 } }
     val artists = com.ravi.musicspot.ui.components.rememberOffMain(lib.history, lib.liked) { // 1.0.7: off the main thread
         (lib.history.map { it.track } + lib.liked).filter { (it.artistId?.startsWith("UC") == true || it.artistId?.startsWith("yt:") == true) && it.artist.isNotBlank() }
             .groupBy { it.artistId!! }.entries.sortedByDescending { it.value.size }.take(14)
@@ -176,7 +192,6 @@ fun SpotlightHomeScreen() {
             // 1.0.5: shelf inputs derived once per data change instead of inside item lambdas on every recomposition.
             val moodTitles = remember(feed?.moods) { feed?.moods.orEmpty().map { it.title } }
             val favTop = remember(favourites) { favourites.take(5) }
-            val recentRest = remember(recent) { recent.drop(1) }
             val mixShelf = remember(mixes) { mixes.distinctBy { it.id }.take(20) }
             val dlShelf = remember(downloaded) { downloaded.take(20) }
             val heroAll = remember(recent, feed?.quickPicks) { (if (recent.isNotEmpty()) recent else feed?.quickPicks.orEmpty()).take(5) }
@@ -203,6 +218,12 @@ fun SpotlightHomeScreen() {
 
                 var sec = 0
                 fun nextSec() = sec++
+                // Pack 5: "Jump back in" (was "Recently played", further down): newest History rows, near the top.
+                if (recent.size > 1 && jumpBack.isNotEmpty()) {
+                    val i = nextSec()
+                    item(key = "s-kl-h", contentType = "header-row") { SpotlightHeader("Jump back in", "Pick up where you left off", i, d) { nav.push(Route.History) } }
+                    item(key = "s-kl", contentType = "recent-cards") { SpotlightJumpBackCards(jumpBack, d, i) }
+                }
                 if (favourites.size >= 2) {
                     val i = nextSec()
                     item(key = "s-fav-h", contentType = "fav-header") { SpotlightOnRepeatHeader(favourites, i, d) }
@@ -214,16 +235,20 @@ fun SpotlightHomeScreen() {
                     item(key = "s-tod-h", contentType = "header-row") { SpotlightHeader(todPart.shelfTitle, "What you usually play around this time", i, d) { nav.push(Route.ShelfAll(shelf)) } }
                     item(key = "s-tod", contentType = "track-shelf") { TrackShelf(todPicks, d.card, d, i) }
                 }
+                if (topArtists.isNotEmpty()) { // Pack 5: from PlayStats (3+ artists with 3+ counted plays each)
+                    val i = nextSec()
+                    item(key = "s-top-art-h", contentType = "header-row") { SpotlightHeader("Your top artists", "Who you play the most lately", i, d) }
+                    item(key = "s-top-art", contentType = "artist-row") { SpotlightTopArtists(topArtists, d, i) }
+                }
+                if (hasAnyPlays) { // Pack 5: entry to Your stats (Wrapped anytime); hidden until something was counted
+                    val i = nextSec()
+                    item(key = "s-wrapped", contentType = "wrapped-card") { SpotlightWrappedCard(wrappedWeek, d, i) { nav.push(Route.Wrapped) } }
+                }
                 f?.forYou?.let { spotlightShelf("s-foryou", it, d, nextSec()) } // v2.0.15: seed-artist shelf on top
                 if (f != null && f.quickPicks.isNotEmpty()) {
                     val i = nextSec()
                     item(key = "s-qp-h", contentType = "header-row") { SpotlightHeader("Quick picks", "Start radio from a song", i, d) { nav.push(Route.ShelfAll(Shelf("Quick picks", f.quickPicks))) } }
                     item(key = "s-qp", contentType = "quickpicks") { QuickPicks(f.quickPicks, d, i, rows = 3) }
-                }
-                if (recent.size > 1) {
-                    val i = nextSec()
-                    item(key = "s-kl-h", contentType = "header-row") { SpotlightHeader("Recently played", "Pick up where you left off", i, d) { nav.push(Route.History) } }
-                    item(key = "s-kl", contentType = "recent-cards") { SpotlightRecentCards(recentRest, d, i) }
                 }
                 if (mixes.isNotEmpty()) {
                     val i = nextSec()
@@ -294,8 +319,17 @@ private fun SpotlightTop(acc: Account?, online: Boolean, heroTracks: List<Track>
     val current = st.current
     val t = current ?: heroTracks.firstOrNull()
     val isCurrent = t != null && current?.id == t.id
-    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val greeting = when (hour) { in 5..11 -> "Good morning"; in 12..16 -> "Good afternoon"; in 17..21 -> "Good evening"; else -> "Late night vibes" }
+    // Pack 5: device clock, re-read at the top of every hour so an open Home doesn't keep a stale greeting.
+    var hour by remember { mutableStateOf(Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val cal = Calendar.getInstance()
+            val toNextHour = (60 - cal.get(Calendar.MINUTE)) * 60_000L - cal.get(Calendar.SECOND) * 1000L
+            kotlinx.coroutines.delay(toNextHour.coerceAtLeast(1_000L))
+            hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        }
+    }
+    val greeting = com.ravi.musicspot.data.HomePersonal.greeting(hour)
     val first = acc?.name?.substringBefore(' ')?.takeIf { it.isNotBlank() }
     val tag = when { isCurrent && st.playing -> "Now playing"; isCurrent -> "Paused"; else -> label }
 
@@ -508,29 +542,90 @@ private fun SpotlightTopList(tracks: List<Track>, d: HomeDims, index: Int) {
     }
 }
 
-/** Recently played as wide horizontal cards: cover on the left, text, round play button. */
+/**
+ * Pack 5 "Jump back in" (was "Recently played"): wide cards, cover on the left, title / artist / when it was played,
+ * round play button. A card for the song that is loaded but paused resumes it where it stopped instead of restarting;
+ * any other card plays History from that song on. (History keeps no per-song position, so only the loaded song resumes.)
+ */
 @Composable
-private fun SpotlightRecentCards(tracks: List<Track>, d: HomeDims, index: Int) {
+private fun SpotlightJumpBackCards(items: List<com.ravi.musicspot.data.HomePersonal.JumpBack>, d: HomeDims, index: Int) {
     val c = MaterialTheme.colorScheme
     val w = if (d.wide) 320.dp else 272.dp
     val h = 84.dp
-    val shown = remember(tracks) { tracks.take(20) }
+    val st by Graph.player.state.collectAsState()
+    val tracks = remember(items) { items.map { it.entry.track } }
     LazyRow(Modifier.staggerIn(index), contentPadding = PaddingValues(horizontal = d.gutter), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        // 1.0.5: contentType; ids are unique (recent is distinctBy id), take(20) hoisted out of the LazyRow content.
-        itemsIndexed(shown, key = { _, t -> "srp" + t.id }, contentType = { _, _ -> "recent-card" }) { i, t ->
+        // ids are unique (HomePersonal.jumpBackIn keeps each song once).
+        itemsIndexed(items, key = { _, j -> "srp" + j.entry.track.id }, contentType = { _, _ -> "recent-card" }) { i, j ->
+            val t = j.entry.track
+            val loaded = st.current?.id == t.id
+            val resume = loaded && !st.playing
+            val detail = when {
+                loaded && st.playing -> "Playing now"
+                resume -> "Paused · tap to resume"
+                j.entry.plays > 1 -> "${j.ago} · played ${j.entry.plays}×"
+                else -> j.ago
+            }
             Row(Modifier.width(w).height(h).clip(Ms.r20).background(c.surfaceContainerHigh)
-                .pressable(onClickLabel = "Play ${t.title}", pressedScale = 0.97f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) { Graph.player.play(tracks, i) }, verticalAlignment = Alignment.CenterVertically) {
+                .pressable(onClickLabel = if (resume) "Resume ${t.title}" else "Play ${t.title}", pressedScale = 0.97f, onLongClick = { com.ravi.musicspot.ui.openSongMenu(t) }) {
+                    if (loaded) Graph.player.toggle() else Graph.player.play(tracks, i)
+                }, verticalAlignment = Alignment.CenterVertically) {
                 Artwork(t.artUrl, Modifier.size(h), RectangleShape, t.title)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(t.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(t.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = if (loaded) c.primary else c.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(t.artist, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(detail, style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.padding(end = 12.dp).size(36.dp).clip(CircleShape).background(c.primary), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.PlayArrow, null, Modifier.size(20.dp), tint = c.onPrimary)
+                    PlayPauseIcon(loaded && st.playing, Modifier.size(20.dp), tint = c.onPrimary)
                 }
             }
         }
+    }
+}
+
+/**
+ * Pack 5 "Your top artists" (PlayStats): round bubbles like "Artists you like". Opens the artist page when the songs
+ * carry a YouTube artist id; otherwise plays that artist's counted songs (most played first), all on-device.
+ */
+@Composable
+private fun SpotlightTopArtists(artists: List<com.ravi.musicspot.data.HomePersonal.TopArtist>, d: HomeDims, index: Int) {
+    val nav = LocalNav.current
+    val size = if (d.wide) 112.dp else 92.dp
+    LazyRow(Modifier.staggerIn(index), contentPadding = PaddingValues(horizontal = d.gutter), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(artists, key = { "top-art:" + it.name }, contentType = { "artist" }) { a ->
+            Column(Modifier.width(size).pressable(onClickLabel = "Open ${a.name}") {
+                if (a.artistId != null) nav.push(Route.Artist(a.artistId, a.name)) else Graph.player.play(a.tracks, 0)
+            }, horizontalAlignment = Alignment.CenterHorizontally) {
+                Artwork(a.artUrl, Modifier.size(size), CircleShape, a.name)
+                Spacer(Modifier.height(6.dp))
+                Text(a.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                Text("${a.plays} plays", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+/** Pack 5: Home entry to Your stats (Wrapped anytime). Shown only once PlayStats has counted something. */
+@Composable
+private fun SpotlightWrappedCard(week: com.ravi.musicspot.logic.Wrapped.Summary, d: HomeDims, index: Int, onOpen: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    val line = buildList {
+        if (week.totalPlays > 0) add("${week.totalPlays} ${if (week.totalPlays == 1) "play" else "plays"} this week")
+        if (week.currentStreak > 1) add("${week.currentStreak}-day streak")
+    }.joinToString(" · ").ifEmpty { "Your top songs, artists and listening habits" }
+    Row(Modifier.fillMaxWidth().staggerIn(index).padding(start = d.gutter, end = d.gutter, top = 24.dp).clip(Ms.r20).background(c.surfaceContainerHigh)
+        .pressable(onClickLabel = "Open your stats", pressedScale = 0.97f, onClick = onOpen).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(44.dp).clip(Ms.r12).background(c.primary.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.Insights, null, Modifier.size(24.dp), tint = c.primary)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Your stats, anytime", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(line, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, Modifier.size(22.dp), tint = c.onSurfaceVariant)
     }
 }

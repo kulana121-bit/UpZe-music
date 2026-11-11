@@ -146,6 +146,7 @@ fun AuraPlayerScreen(
     androidx.compose.runtime.LaunchedEffect(pane) { pane?.let { if (it.isFull()) lastFull = it } }
     var sleepSheet by remember { mutableStateOf(false) }
     var soundSheet by remember { mutableStateOf(false) } // 1.0.7: EQ / Sound opens over the player
+    var speedSheet by remember { mutableStateOf(false) } // 1.0.10: playback speed + pitch
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val still = reducedMotion()
     val c = MaterialTheme.colorScheme
@@ -189,7 +190,7 @@ fun AuraPlayerScreen(
                         Spacer(Modifier.width(20.dp))
                         AnimatedContent(pane.inPlayer(), transitionSpec = { MotionSpec.fadeThrough(still) }, label = "auraLand", modifier = Modifier.weight(1.2f).fillMaxHeight()) { p ->
                             if (p == null) Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
-                                AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = { soundSheet = true }, onPane = { pane = it }, openPane = pane, hideCapsule = motionShowing)
+                                AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = { soundSheet = true }, onPane = { pane = it }, openPane = pane, hideCapsule = motionShowing, onOpenSpeed = { speedSheet = true })
                             } else AuraPaneCard(p, t, onCollapse, onNavigate)
                         }
                     }
@@ -211,7 +212,7 @@ fun AuraPlayerScreen(
                                 AuraCover(t.artUrl, coverVisible, onCoverBounds, Modifier.fillMaxSize().then(coverLook), reflection = true)
                             }
                             else AuraCover(t.artUrl, coverVisible, onCoverBounds, Modifier.weight(1f).fillMaxWidth().then(coverLook), reflection = true)
-                            AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = { soundSheet = true }, onPane = { pane = it }, openPane = null, hideCapsule = motionShowing,
+                            AuraDeck(onOpenSleep = { sleepSheet = true }, onOpenEq = { soundSheet = true }, onPane = { pane = it }, openPane = null, hideCapsule = motionShowing, onOpenSpeed = { speedSheet = true },
                                 modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 8.dp))
                         } else Column(Modifier.fillMaxSize()) {
                             AuraMiniHeader(onClose = { pane = null })
@@ -226,6 +227,7 @@ fun AuraPlayerScreen(
     // 1.0.1: Queue / Lyrics open full screen over the player (pager + tabs, swipe down or Back to close).
     FullScreenPane(pane, onSelect = { pane = it }, onClose = { pane = null }, reveal = reveal, onNavigate = { pane = null; onCollapse(); onNavigate(it) })
     SleepSheet(sleepSheet) { sleepSheet = false }
+    SpeedSheet(speedSheet) { speedSheet = false }
     com.ravi.musicspot.ui.settings.SoundSheet(soundSheet) { soundSheet = false }
 }
 
@@ -389,7 +391,7 @@ private fun AuraCover(url: String?, visible: Boolean, onBounds: (Rect) -> Unit, 
 
 /** The liquid-glass control deck. */
 @Composable
-private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pane) -> Unit, openPane: Pane?, modifier: Modifier = Modifier, hideCapsule: Boolean = false) {
+private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pane) -> Unit, openPane: Pane?, modifier: Modifier = Modifier, hideCapsule: Boolean = false, onOpenSpeed: () -> Unit = {}) {
     val st by Graph.player.state.collectAsState()
     // v2.0.14b: position is collected inside AuraSeekBar so the deck doesn't recompose 4x/sec.
     val lib by Graph.library.data.collectAsState()
@@ -460,6 +462,8 @@ private fun AuraDeck(onOpenSleep: () -> Unit, onOpenEq: () -> Unit, onPane: (Pan
             AuraChip(Icons.Rounded.Explore, "Related", openPane == Pane.RELATED) { onPane(Pane.RELATED) }
             AuraChip(Icons.Rounded.Bedtime, if (sleepOn) sleepLabelPublic() else "Sleep", sleepOn) { onOpenSleep() }
             AuraChip(Icons.Rounded.Equalizer, if (engine.eqActive) "EQ on" else "Sound", engine.eqActive) { onOpenEq() }
+            val sp by Graph.player.speed.collectAsState() // 1.0.10: real speed control (was an unused Ic.Speed icon)
+            AuraChip(com.ravi.musicspot.ui.Ic.Speed, if (sp.speed != 1f) com.ravi.musicspot.playback.speedLabel(sp.speed) else "Speed", sp.speed != 1f) { onOpenSpeed() }
         }
     }
 }

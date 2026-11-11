@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -15,6 +16,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -39,6 +43,30 @@ class PlayerConnection(private val ctx: Context) {
     private val pendingOps = mutableListOf<(MediaController) -> Unit>()
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
+
+    /**
+     * 1.0.10: playback speed (0.5x–2x) and whether the voice keeps its natural pitch. Held here for the whole session,
+     * so it survives track changes and queue replacement, and is re-applied (in [publish]) if the player or the
+     * controller is rebuilt. keepPitch = pitch 1.0 (Media3's Sonic time-stretch); otherwise pitch follows the speed.
+     */
+    data class Speed(val speed: Float = 1f, val keepPitch: Boolean = true) {
+        val pitch: Float get() = if (keepPitch) 1f else speed
+    }
+    private val _speed = MutableStateFlow(Speed())
+    val speed: StateFlow<Speed> = _speed
+
+    fun setSpeed(speed: Float, keepPitch: Boolean = _speed.value.keepPitch) {
+        _speed.value = Speed(clampSpeed(speed), keepPitch)
+        run { c -> applySpeed(c) }
+    }
+
+    private fun applySpeed(c: MediaController) {
+        val s = _speed.value
+        val want = PlaybackParameters(s.speed, s.pitch)
+        if (c.playbackParameters != want && c.isCommandAvailable(Player.COMMAND_SET_SPEED_AND_PITCH)) c.playbackParameters = want
+    }
+    /** 1.0.10 test hook (UI smoke tests only): publishes a player state without a MediaController. */
+    internal fun publishForTest(s: State) { _state.value = s }
     private val _position = MutableStateFlow(0L)
     val position: StateFlow<Long> = _position
     private var connecting = false
@@ -73,16 +101,34 @@ class PlayerConnection(private val ctx: Context) {
             val ops = pendingOps.toList(); pendingOps.clear()
             ops.forEach { op -> runCatching { op(c) }.onFailure { com.ravi.musicspot.core.CrashGuard.nonFatal(ctx, "MediaController.pendingOp", it) } }
             pollJob?.cancel() // v2.0.14: one poll loop only
-            pollJob = scope.launch { while (isActive) { controller?.let { _position.value = it.currentPosition.coerceAtLeast(0) }; delay(250) } }
+            // 1.0.10: the 250 ms poll runs only while (playing) OR (a position consumer is on screen: something collects
+            // [position] and the app is in the foreground). Otherwise it stops; each (re)open samples the position at
+            // once, and publish() also refreshes it on every player event (seek, pause, track change), so it's never stale.
+            pollJob = scope.launch {
+                kotlinx.coroutines.flow.combine(
+                    _state.map { it.playing },
+                    _position.subscriptionCount.map { it > 0 },
+                    androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentStateFlow.map { it.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED) },
+                ) { playing, watched, foreground -> playing || (watched && foreground) }
+                    .distinctUntilChanged()
+                    .collectLatest { on ->
+                        samplePosition()
+                        if (on) while (isActive) { delay(250); samplePosition() }
+                    }
+            }
         }, androidx.core.content.ContextCompat.getMainExecutor(ctx))
     }
 
+    private fun samplePosition() { controller?.let { _position.value = it.currentPosition.coerceAtLeast(0) } }
+
     private fun publish() {
         val c = controller ?: return
+        _position.value = c.currentPosition.coerceAtLeast(0) // 1.0.10: fresh on every event, even with the poll stopped
         val q = (0 until c.mediaItemCount).mapNotNull { c.getMediaItemAt(it).track() }
         _state.value = State(q, c.currentMediaItemIndex.takeIf { q.isNotEmpty() } ?: -1, c.isPlaying, c.playbackState == Player.STATE_BUFFERING,
             c.shuffleModeEnabled, c.repeatMode, c.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: (q.getOrNull(c.currentMediaItemIndex)?.durationMs ?: 0),
             (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).isAutoplay } ?: -1)
+        applySpeed(c) // 1.0.10: keep the session's speed if the player was rebuilt (no-op when it already matches)
     }
 
     /**
@@ -155,3 +201,10 @@ class PlayerConnection(private val ctx: Context) {
 
     @Suppress("unused") private fun items(c: MediaController): List<MediaItem> = (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
 }
+
+/** 1.0.10: speed range of the player's speed picker. */
+const val MIN_SPEED = 0.5f
+const val MAX_SPEED = 2f
+fun clampSpeed(s: Float): Float = if (s.isNaN()) 1f else s.coerceIn(MIN_SPEED, MAX_SPEED)
+/** "1x", "1.25x", "0.5x". */
+fun speedLabel(s: Float): String = "%.2f".format(java.util.Locale.ROOT, s).trimEnd('0').trimEnd('.') + "x"

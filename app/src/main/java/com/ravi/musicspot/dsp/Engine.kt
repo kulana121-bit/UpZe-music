@@ -5,6 +5,9 @@ import kotlin.math.max
 
 enum class EnhanceLevel { OFF, LIGHT, STRONG }
 
+/** 1.0.10: which ReplayGain value to use (falls back to the other one when the chosen one is missing). */
+enum class ReplayGainMode { OFF, TRACK, ALBUM }
+
 /** Settings of the whole engine; swapped atomically from the UI thread. */
 data class EngineSettings(
     val eq: EqConfig = EqConfig(),
@@ -18,6 +21,10 @@ data class EngineSettings(
     val spatial: Boolean = false,
     /** 1.0.8: 0..1 strength of [spatial]. */
     val spatialIntensity: Double = 0.5,
+    /** 1.0.10: per-track loudness normalisation (applied by EngineAudioProcessor's gain stage, not by [EngineCore]). */
+    val loudnessNormalize: Boolean = false,
+    /** 1.0.10: ReplayGain mode; same gain stage, and a ReplayGain value wins over normalisation. */
+    val replayGain: ReplayGainMode = ReplayGainMode.OFF,
 ) {
     val enhanceRequested: Boolean get() = upscaleRate > 0 || bandwidthExtension != EnhanceLevel.OFF || transientRestore
 }
@@ -138,7 +145,17 @@ class EngineCore(val inRate: Int, val channels: Int, initial: EngineSettings) {
     fun maxOutputFrames(inFrames: Int) = resampler?.maxOutputFor(inFrames) ?: inFrames
 
     /** Returns the output array (may be [input] itself when identity) and frame count. */
-    fun process(input: FloatArray, frames: Int, out: FloatArray): Int {
+    /**
+     * 1.0.10: adopts any pending settings (exactly as [process] would) and says whether this buffer would be an exact
+     * identity, so the processor can pass the raw PCM through without converting or dithering it.
+     */
+    fun passThrough(): Boolean {
+        adoptPending()
+        if (guard.overloaded) { bwe = null; shaper = null }
+        return isIdentity && outRate == inRate
+    }
+
+    private fun adoptPending() {
         // 1.0.7: while an EQ crossfade is running, the next swap waits until it ends (<= FADE frames, ~43 ms). Before,
         // a slider drag replaced the fading chain mid-fade and the old curve was cut off (an audible tick); now drags
         // coalesce in [pending] (latest wins) and every change still gets its full click-free crossfade.
@@ -157,6 +174,10 @@ class EngineCore(val inRate: Int, val channels: Int, initial: EngineSettings) {
             settings = ns
             eqNeutral = p.eqNeutral
         }
+    }
+
+    fun process(input: FloatArray, frames: Int, out: FloatArray): Int {
+        adoptPending()
         if (guard.overloaded) { bwe = null; shaper = null }
         if (isIdentity) { System.arraycopy(input, 0, out, 0, frames * channels); return frames }
 

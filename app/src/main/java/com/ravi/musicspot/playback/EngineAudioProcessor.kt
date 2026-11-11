@@ -29,7 +29,79 @@ class EngineAudioProcessor(private val settings: () -> EngineSettings) : BaseAud
     private var lastStatusAt = 0L
     private val rng = java.util.Random()
 
-    fun apply(s: EngineSettings) { core?.update(s); pendingCore?.update(s) }
+    fun apply(s: EngineSettings) { core?.update(s); pendingCore?.update(s); levelCfg = s; levelDirty = true }
+
+    // ---- 1.0.10 volume levelling: ONE gain stage for ReplayGain and loudness normalisation (see GainPlan) ----
+    private class TrackReq(val id: String?, val tags: ReplayGainTags?)
+    @Volatile private var trackReq: TrackReq? = null
+    @Volatile private var levelCfg: EngineSettings? = null
+    @Volatile private var levelDirty = true
+    private var lvId: String? = null
+    private var lvTags: ReplayGainTags? = null
+    private var meter: LoudnessMeter? = null
+    private var meterRate = 0; private var meterCh = 0
+    private var lvGain = 1f
+    private var lvTarget = 1f
+    private var lvAlpha = 0f
+    private var lvFramesSinceEval = 0
+    private var lvProvisional = false
+
+    /** The track now playing and its ReplayGain tags (if any). Called on the player thread on transitions / new tracks. */
+    fun setTrack(id: String?, tags: ReplayGainTags?) { trackReq = TrackReq(id, tags); levelDirty = true }
+
+    /** Seconds of a track that must be heard before its measured loudness is kept. */
+    private val minKeepSeconds = 30.0
+
+    private fun finishMeter() {
+        val m = meter ?: return
+        val id = lvId
+        if (id != null && m.seconds >= minKeepSeconds) m.result()?.let { LoudnessStore.put(id, it) }
+        meter = null
+    }
+
+    /** Audio thread: picks up a new track / settings and recomputes the target gain. */
+    private fun levelUpdate(rate: Int, ch: Int, frames: Int) {
+        val req = trackReq
+        val s = levelCfg ?: settings()
+        if (req != null && req.id != lvId) { finishMeter(); lvId = req.id; levelDirty = true }
+        if (req != null && req.tags != lvTags) { lvTags = req.tags; levelDirty = true }
+        if (rate != meterRate || ch != meterCh) { meter = null; meterRate = rate; meterCh = ch }
+        val stored = lvId?.let { LoudnessStore.get(it) }
+        val wantMeter = s.loudnessNormalize && lvId != null && stored == null
+        if (wantMeter && meter == null) meter = LoudnessMeter(rate, ch)
+        if (!wantMeter && meter != null) finishMeter()
+        lvFramesSinceEval += frames
+        val reEval = lvProvisional && lvFramesSinceEval >= rate // provisional estimate: refresh about once a second
+        if (!levelDirty && !reEval) return
+        levelDirty = false; lvFramesSinceEval = 0
+        val m = meter
+        val running = if (stored == null && m != null && m.seconds >= 5.0) m.result() else null
+        lvProvisional = stored == null && m != null
+        val d = GainPlan.decide(s.replayGain, s.loudnessNormalize, lvTags, stored ?: running, provisional = stored == null)
+        lvTarget = GainPlan.linear(d.gainDb)
+        // Track changes / settings move in ~150 ms; a running estimate eases in over ~1.5 s so it never pumps.
+        lvAlpha = smoothing(if (lvProvisional) 1.5 else 0.15, rate)
+    }
+
+    /** Measures (pre-gain) and applies the levelling gain in place. Never raises a sample past full scale. */
+    private fun level(x: FloatArray, frames: Int, ch: Int) {
+        meter?.feed(x, frames)
+        if (lvGain == 1f && lvTarget == 1f) return
+        val a = lvAlpha
+        var g = lvGain
+        val t = lvTarget
+        var i = 0
+        for (f in 0 until frames) {
+            g += (t - g) * a
+            if (kotlin.math.abs(t - g) < 1e-5f) g = t
+            for (c in 0 until ch) {
+                val v = x[i] * g
+                x[i] = if (g > 1f) v.coerceIn(-1f, 1f) else v
+                i++
+            }
+        }
+        lvGain = g
+    }
 
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT && inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT) throw UnhandledAudioFormatException(inputAudioFormat)
@@ -57,12 +129,33 @@ class EngineAudioProcessor(private val settings: () -> EngineSettings) : BaseAud
         if (frames == 0) { inputBuffer.position(inputBuffer.limit()); return }
         if (inFloats.size < samples) inFloats = FloatArray(samples)
         val src = inputBuffer.order(ByteOrder.nativeOrder())
+        levelUpdate(inputAudioFormat.sampleRate, ch, frames)
+        // 1.0.10 true pass-through: EQ neutral, no enhance / spatial / upscale and unity levelling gain → the PCM goes
+        // out byte for byte (no float conversion, no dither, no gain). Meters only read a float copy when they need one.
+        if (lvGain == 1f && lvTarget == 1f && c.passThrough()) {
+            if (meter != null || BeatMeter.wanted) {
+                val inF = inFloats
+                val p0 = src.position()
+                val total = frames * ch
+                if (float) { var i = 0; while (i < total) { inF[i] = src.getFloat(p0 + i * 4); i++ } }
+                else { var i = 0; while (i < total) { inF[i] = src.getShort(p0 + i * 2) / 32768f; i++ } }
+                meter?.feed(inF, frames)
+                if (BeatMeter.wanted) BeatMeter.feed(inF, frames, ch, inputAudioFormat.sampleRate)
+            }
+            val out = replaceOutputBuffer(inputBuffer.remaining())
+            out.put(inputBuffer)
+            out.flip()
+            val now = System.currentTimeMillis()
+            if (now - lastStatusAt > 500) { lastStatusAt = now; _status.value = c.status }
+            return
+        }
         // 1.0.5: plain indexed loops over a local array ref; no views (asFloatBuffer/asShortBuffer allocate) or boxing.
         val inF = inFloats
         val total = frames * ch
         if (float) { var i = 0; while (i < total) { inF[i] = src.getFloat(); i++ } }
         else { var i = 0; while (i < total) { inF[i] = src.getShort() / 32768f; i++ } }
         inputBuffer.position(inputBuffer.limit())
+        level(inF, frames, ch) // 1.0.10: ReplayGain / loudness normalisation, one stage
         val maxOut = c.maxOutputFrames(frames) * ch
         if (outFloats.size < maxOut) outFloats = FloatArray(maxOut)
         val t0 = System.nanoTime()

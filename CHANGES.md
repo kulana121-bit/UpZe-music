@@ -1,4 +1,110 @@
-# UpZe v1.05 (internal 1.0.10, versionCode 35): 2 small jobs
+# Pack 5 (Nayi Jeet), Part 1 of 2: personalised Home + Wrapped anytime (versionName/versionCode unchanged: v1.05 / 35)
+
+Everything is built on data the app already keeps on the device (PlayStats per-track plays/repeats, the per-day log,
+time-of-day buckets; History rows). No new tracking, no network.
+
+## Files
+- `data/HomeFeed.kt`: new pure `HomePersonal` (greeting by hour, "Jump back in" from History with "x ago", "Your top artists" from PlayStats; each returns empty when there is too little data).
+- `ui/screens/HomeSpotlight.kt`: greeting via `HomePersonal.greeting`, refreshed at each hour; "Recently played" became "Jump back in" and moved up under the moods (same History data and threshold, skips the spotlight song, shows when played / play count, a paused loaded song resumes instead of restarting); new "Your top artists" row and a "Your stats, anytime" card after "On repeat" / time-of-day (both hidden without counted plays). Nothing removed; the other sections keep their order.
+- `ui/screens/WrappedScreen.kt` (new): Your stats screen. Week / Month / Year / All time picker, "All your sources, counted together" line, cards in order: total plays, listening days + current streak, top 5 songs, top 5 artists, most repeated, favourite time of day; each card hides when the range has no data for it.
+- `logic/Wrapped.kt` (new): `Wrapped.summarize(PlayStatsData, Range, today)` — the single pure aggregation (no Android) — plus `Wrapped.streak`.
+- `ui/Nav.kt`: `Route.Wrapped` (one line).
+- `ui/AppRoot.kt`: `Route.Wrapped -> WrappedScreen()` (one line; the route switch lives here, not in MainActivity.kt).
+- `ui/screens/Library.kt`: "Your stats" tile under Listen together (entry point).
+- `app/src/test/.../WrappedStatsTest.kt` (new, 10 tests): in/out of range (incl. future days), all-time counter, top-N order and cap with ties, most repeated / time of day limited to the range, hidden cards, streak (unbroken, broken by a gap or a zero day, still current until today ends), empty data → empty result for every range.
+- `app/src/test/.../HomePersonalTest.kt` (new, 4 tests): greeting, Jump back in (new listener → empty), "ago" labels, top-artists threshold and order.
+
+## Build (JDK 21, AGP 9.3.0, compileSdk 37)
+- `compileDebugKotlin`: before BUILD SUCCESSFUL · after BUILD SUCCESSFUL (no new warnings in changed files).
+- `testDebugUnitTest`: before 254 tests, 0 failed, 9 skipped (47 classes) · after 268 tests, 0 failed, 9 skipped (49 classes). +14 = the two new classes. No existing test was edited; none that passed before fails now.
+
+## Notes
+- Repeat counts and time-of-day buckets are lifetime per song (the day log holds plays only). For Week/Month/Year the range picks which songs qualify; "Most repeated" says "in total", and the time-of-day share scales each song's buckets to its plays in the range.
+- History stores no playback position, so "resume" applies to the song currently loaded in the player; other cards play History from that song.
+- "On repeat" ranking is unchanged (plays + 2 × repeats + likes, recency-decayed).
+- No share-image export (Part 2).
+
+# UpZe v1.05 (internal 1.0.10, versionCode 35): 12 small jobs
+
+## 4A. True pass-through when every effect is off
+- `playback/EngineAudioProcessor.kt`: when the engine is identity (EQ neutral or off, no EQ crossfade running, no
+  bandwidth extension / transient restore / 3D Sound / upscale) and the levelling gain is exactly 1, each buffer is
+  copied out byte for byte: no float conversion, no dither, no gain. The loudness meter and Live-lyrics meter read a
+  float copy only when they're running. Any effect on → processing exactly as before. Pure/bit-perfect escape untouched.
+- `dsp/Engine.kt`: `EngineCore.passThrough()` adopts pending settings (same code path `process()` uses, now
+  `adoptPending()`) and reports identity at the same rate. Processing itself is unchanged.
+- `app/src/test/.../EnginePassThroughTest.kt` (new, 5 tests): PCM16 and float byte-identical with identity config
+  (EQ off, and EQ on but flat); EQ preamp, bandwidth extension, transient restore, 3D Sound and a ReplayGain gain each
+  change the output.
+Note: the app's defaults keep Enhance (light) and Transient restore on, so pass-through engages once those are off.
+
+## 3E/3F. Idle loops gated (no behaviour change while playing or on screen)
+- `playback/PlaybackService.kt`: the service ticker keeps its 200 ms (40 ms while fading) cadence only while
+  **player.isPlaying OR a sleep timer is set** (its live countdown and fade). Otherwise it waits for playback to start
+  or a sleep timer to be set (`tickerPlaying` / `Playback.sleepTick`), with a 30 s heartbeat (`IDLE_HEARTBEAT_MS`),
+  and runs its body immediately on wake.
+- `playback/PlayerConnection.kt`: the 250 ms position poll runs only while **playing OR (something collects `position`
+  AND the app is in the foreground)** (ProcessLifecycleOwner ≥ STARTED); otherwise it stops. The position is sampled
+  the moment the gate opens or closes and on every player event in `publish()` (seek, pause, track change), so the
+  seekbar and lyrics clock never show a stale position.
+
+## 3C/3D. Volume levelling: loudness normalisation + ReplayGain (one gain path)
+Gain precedence (fixed, decided only in `GainPlan.decide`): a ReplayGain value for the chosen mode wins (Album falls
+back to Track and vice versa); loudness normalisation fills in only when there is none, or when ReplayGain is Off;
+otherwise unity. One decision → one gain stage, so the two can never double-apply.
+Defaults: Loudness normalisation **Off**, ReplayGain **Off** (no change for existing users until switched on).
+- `playback/Loudness.kt` (new): `GainPlan` (target -18 LUFS = ReplayGain 2.0 reference; boosts max +6 dB, only with a
+  known peak, and never above peak −1 dB; cuts only while a song is still being measured), `ReplayGain` tag parser
+  (Vorbis comments, ID3 TXXX, MP4 freeform, Opus R128), BS.1770 `LoudnessMeter`, and `LoudnessStore` (measured
+  loudness per track id, persisted in `files/loudness.tsv`).
+- `playback/EngineAudioProcessor.kt`: the single levelling gain stage (before the engine core, smoothed, hard-capped at
+  full scale when boosting) plus per-track measurement; `setTrack(id, tags)`.
+- `playback/PlaybackService.kt`: initialises `LoudnessStore`; on item transition / tracks changed, passes the current
+  track id and its parsed ReplayGain tags (local files and streams alike) to the engine.
+- `dsp/Engine.kt`: `ReplayGainMode` (Off/Track/Album); `EngineSettings.loudnessNormalize` / `replayGain`.
+- `data/Settings.kt`: `AppSettings.loudnessNormalize = false`, `replayGain = OFF`, passed into `engine()`.
+- `ui/settings/SoundPage.kt`: Settings › Sound › "Volume levelling": Loudness normalisation switch + ReplayGain
+  choice (Off / Track / Album). Disabled while pure hi-res / bit-perfect is on (that path bypasses all processing).
+- `app/src/test/.../LevellingTest.kt` (new, 7 tests): precedence, no double-apply, boost caps, tag parsing, BS.1770 meter.
+Known limits: with gapless playback a new song's first fraction of a second can still play at the previous song's gain
+(the sink processes slightly ahead of the transition event); the gain then eases to the new value. YouTube's own
+loudness value isn't used (outside the files this job touched).
+
+## 3A. Playback speed + pitch (0.5x–2x)
+- `playback/PlayerConnection.kt`: session-wide `speed` state + `setSpeed(speed, keepPitch)` applied via
+  `PlaybackParameters` (keepPitch = pitch 1.0 through Media3's Sonic time-stretch; off = pitch follows speed). It is
+  re-applied in `publish()`, so it survives track changes, queue replacement and player/controller rebuilds.
+  Helpers: `MIN_SPEED`/`MAX_SPEED`, `clampSpeed`, `speedLabel`.
+- `ui/player/Panes.kt`: new `SpeedSheet` with a 0.5–2x slider (0.05 steps), presets (0.5/0.75/1/1.25/1.5/2x) and a
+  "Keep natural voice (preserve pitch)" toggle.
+- `ui/player/AuraPlayer.kt`: the previously unused `Ic.Speed` icon is now a Speed chip in the player deck (shows e.g.
+  "1.25x" while not 1x) that opens `SpeedSheet`.
+
+## 3B. Save the whole queue as a playlist
+- `ui/player/Panes.kt`: Up next header gets a "Save queue as playlist" button that hands the entire queue (in order)
+  to the existing `AddToPlaylistDialog` via `Menus.addToPlaylist`. The dialog and playlist code are reused unchanged.
+
+## 2E. UI smoke tests (Robolectric + Compose, no screenshots)
+- `app/src/test/java/com/ravi/musicspot/UiSmokeTest.kt` (new): 10 tests. Home, Library, Search, Player (AuraPlayerScreen)
+  and Cached songs each compose with an empty and a populated state (local stores only, no network).
+- `data/CachedSongs.kt`: test hook only. `internal fun publishForTest(entries)` sets `complete` (no index/cache change).
+- `playback/PlayerConnection.kt`: test hook only. `internal fun publishForTest(state)` sets `state` without a MediaController.
+  No behaviour change; nothing in the app calls either hook.
+
+## 2D. Five silent failures now logged (PlaybackLog, redacted; no behaviour change)
+- `source/SourceManager.kt`: `raceYouTube` fallback path: the empty catch on a fallback candidate's resolve, and the
+  swallowed fallback-search failure, now log the track/source and the exception.
+- `playback/PlaybackService.kt`: three blanket `runCatching` blocks (posted player action, resume URL refresh,
+  refused-URL handling) now log the failure via `onFailure`.
+- `source/MonochromeSource.kt`: `resolve` logs each mirror failover, from-mirror → to-mirror, with the reason.
+- `source/QobuzProxySource.kt`: `resolve` logs each proxy failover, from-proxy → to-proxy, with the reason.
+
+## 2C. Innertube parser fixture tests (tests only, parser unchanged)
+- `app/src/test/java/com/ravi/musicspot/InnertubeParserTest.kt` (new): 8 tests covering search (All + Videos tab), album page
+  (header credit, fixed-column duration), playlist page (own tracks vs Suggestions, both continuation shapes), and stream
+  format parse/rank (`YtFormats` in `yt/YtStreams.kt`).
+- `app/src/test/resources/innertube/{search,album,playlist,playlist_continuation,player_formats}.json` (new): small
+  hand-written fixtures. No parser bug found; `InnertubeParser.kt` and `YtStreams.kt` untouched.
 
 ## 2A. Autoplay seed-guard fix + test update
 - `playback/PlaybackService.kt`: `maybeAutoplay` skipped a seed whose id matched the previous seed (`autoplayFor`), even

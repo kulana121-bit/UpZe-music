@@ -192,9 +192,15 @@ class SourceManager(
         if (yt.isCompleted) return@coroutineScope yt.await()
         // YouTube is slow: resolve the fallback match (if any) while YouTube keeps going; first stream wins.
         val alt = async {
-            val found = try { fb.await() } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+            val found = try { fb.await() } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                PlaybackLog.log("Race: fallback search for ${cand.title} failed: ${e.javaClass.simpleName}: ${e.message}") // 1.0.10
+                emptyList()
+            }
             for (c in found) {
-                try { return@async resolveFallback(c, quality, metered) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+                try { return@async resolveFallback(c, quality, metered) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                    // 1.0.10: was an empty catch; say which fallback candidate failed and why.
+                    PlaybackLog.log("Race: fallback ${c.source.label} \"${c.title}\" failed to resolve: ${e.javaClass.simpleName}: ${e.message}")
+                }
             }
             null
         }

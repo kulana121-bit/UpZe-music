@@ -161,6 +161,10 @@ data class AppSettings(
     val spatial3d: Boolean = false,
     /** 1.0.8: 3D Sound strength, 0..1. */
     val spatialIntensity: Float = 0.5f,
+    /** 1.0.10: loudness normalisation (Settings › Sound › Volume levelling); off by default. */
+    val loudnessNormalize: Boolean = false,
+    /** 1.0.10: ReplayGain mode; Off by default. A ReplayGain value wins over loudness normalisation. */
+    val replayGain: com.ravi.musicspot.dsp.ReplayGainMode = com.ravi.musicspot.dsp.ReplayGainMode.OFF,
     val region: String? = null,
     val recentSearches: List<String> = emptyList(),
     // v2.0.15: the first-time design setup (ui/setup/SetupFlow) has been finished or skipped.
@@ -175,7 +179,8 @@ data class AppSettings(
     /** v2.0.6 dock behaviour; before the choice existed, "hide on scroll" off meant always visible, on → Mini. */
     val navMode: NavBarMode get() = navBarMode ?: if (hideNavOnScroll) NavBarMode.MINI else NavBarMode.ALWAYS
     fun engine(lowEnd: Boolean) = EngineSettings(eq.toConfig(), upscaleRate, bwe, transientRestore, lowEnd,
-        spatial = spatial3d, spatialIntensity = spatialIntensity.toDouble().coerceIn(0.0, 1.0))
+        spatial = spatial3d, spatialIntensity = spatialIntensity.toDouble().coerceIn(0.0, 1.0),
+        loudnessNormalize = loudnessNormalize, replayGain = replayGain)
 
     companion object {
         /**

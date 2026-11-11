@@ -86,6 +86,9 @@ class CachedSongs(private val ctx: Context, dir: File) {
         len > 0 && c.isCached(key, 0, len)
     }.getOrDefault(false)
 
+    /** 1.0.10 test hook (UI smoke tests only): publishes [entries] as [complete] without touching the index or cache. */
+    internal fun publishForTest(entries: List<Entry>) { _complete.value = entries }
+
     /** Recompute [complete] (IO thread); also drops index entries the cache has already evicted. */
     fun refresh(): List<Entry> {
         awaitIndex() // 1.0.5

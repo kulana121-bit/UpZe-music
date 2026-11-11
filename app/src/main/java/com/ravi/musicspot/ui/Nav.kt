@@ -50,6 +50,8 @@ sealed interface Route {
     /** 1.0.1: the Customize (design setup) flow and the artist picker, opened from Settings; drawn full screen by AppRoot. */
     data object Customize : Route
     data object Artists : Route
+    /** Pack 5: Your stats (Wrapped anytime), from Home and Library. */
+    data object Wrapped : Route
 }
 
 /** One back stack per tab, so switching tabs keeps each tab's place (like OpenTune's tabs). */

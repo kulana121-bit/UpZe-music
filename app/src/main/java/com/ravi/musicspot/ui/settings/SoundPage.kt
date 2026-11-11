@@ -196,6 +196,18 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.soundItems(st: Sound
         }
     }
 
+    // 1.0.10: volume levelling. ReplayGain and loudness normalisation share one gain stage; ReplayGain wins.
+    item(key = "soundpage-level", contentType = "static") {
+        Group("Volume levelling", footer = "One gain stage for both. When a song carries ReplayGain tags (and ReplayGain isn't Off) they're used; " +
+            "otherwise normalisation fills in. Songs aim for −18 LUFS: loud ones are turned down, quiet ones up by at most 6 dB, " +
+            "and never past their peak, so nothing clips. Normalisation learns a song while it plays (on the first play it only turns down).") {
+            SwitchRow("Loudness normalisation", if (pure) "Off while pure hi-res / bit-perfect output is on" else "Plays songs at a consistent loudness",
+                s.loudnessNormalize, enabled = !pure) { v -> Graph.settings.update { it.copy(loudnessNormalize = v) } }
+            ChoiceRow("ReplayGain", com.ravi.musicspot.dsp.ReplayGainMode.entries, s.replayGain,
+                { it.name.lowercase().replaceFirstChar(Char::uppercase) }, enabled = !pure) { v -> Graph.settings.update { it.copy(replayGain = v) } }
+        }
+    }
+
     // 1.0.8: 3D Sound (Spatial 3D). Honest label: virtual speakers for stereo on headphones, not Dolby Atmos.
     item(key = "soundpage-3d", contentType = "static") {
         Group("3D Sound", footer = "For headphones. Places your stereo music in front of you, like two speakers in a room: wider image, " +

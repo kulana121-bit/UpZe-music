@@ -1,6 +1,7 @@
 package com.ravi.musicspot.source
 
 import com.ravi.musicspot.core.Http
+import com.ravi.musicspot.core.PlaybackLog
 import com.ravi.musicspot.model.Quality
 import com.ravi.musicspot.model.SourceKind
 import com.ravi.musicspot.model.StreamInfo
@@ -95,13 +96,15 @@ class MonochromeSource(private val enabled: () -> Boolean) : MusicSource {
         }
 
         // Try mirrors in sequence with fLaC header probe
-        for (mirror in MIRRORS) {
+        for ((i, mirror) in MIRRORS.withIndex()) {
             val urlApi = "$mirror/track/$trackId?quality=$audioQuality"
             try {
                 val respStr = Http.getString(urlApi, mapOf("User-Agent" to "UpZe/1.0 (Android)"))
-                val resp = json.parseToJsonElement(respStr) as? JsonObject ?: continue
+                val resp = json.parseToJsonElement(respStr) as? JsonObject
+                if (resp == null) { logFailover(i, "response is not a JSON object"); continue }
                 val streamUrl = (resp["url"] as? JsonPrimitive)?.contentOrNull
-                    ?: (resp["streamUrl"] as? JsonPrimitive)?.contentOrNull ?: continue
+                    ?: (resp["streamUrl"] as? JsonPrimitive)?.contentOrNull
+                if (streamUrl == null) { logFailover(i, "no url/streamUrl in response"); continue }
 
                 if (streamUrl.startsWith("http")) {
                     // v1.04: probe the stream's first bytes. Only a positively confirmed "fLaC" header is labelled
@@ -115,13 +118,22 @@ class MonochromeSource(private val enabled: () -> Boolean) : MusicSource {
                         cacheKey = "${kind.prefix}:$trackId@$audioQuality"
                     )
                 }
+                logFailover(i, "stream url is not http(s)")
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // Failover to next mirror
+                logFailover(i, "${e.javaClass.simpleName}: ${e.message}")
             }
         }
         throw SourceUnavailableException("Monochrome: unable to resolve valid FLAC stream from any mirror for ${track.title}")
+    }
+
+    /** 1.0.10: a mirror failover is logged (from → to, with the reason) instead of passing silently. */
+    private suspend fun logFailover(i: Int, reason: String) {
+        val from = MIRRORS[i].substringAfter("://")
+        val to = MIRRORS.getOrNull(i + 1)?.substringAfter("://") ?: "none left (source fails)"
+        PlaybackLog.log("Monochrome failover: $from → $to: $reason")
     }
 
     override suspend fun probe(): String {

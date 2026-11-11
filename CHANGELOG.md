@@ -13,7 +13,13 @@ internal 1.0.x numbers. Mapping: 1.0.7 = **v1.02** (versionCode 32), 1.0.8 = **v
 Pack 2A (tests/stability, part 1 of Pack 2):
 - Fixed the long-failing `PlaybackThreadingTest.playViaPlayerConnection`: a new queue whose seed song matched the previous queue's seed never got its autoplay radio (the per-seed guard now resets on playlist change), and the test's stale queue assertion was updated to the 1.0.7 smart-queue behaviour (played songs are kept above the playing song). Test tone lengthened so Robolectric's virtual clock cannot play it out mid-test.
 - Pack 2B: `./gradlew lintDebug` now runs and passes — 16 errors fixed (0 remain), no lint baseline added; 97 warnings remain as warnings.
-- No user-facing changes.
+- Pack 2C: InnertubeParser fixture tests (8) — parser unchanged, no bug found.
+- Pack 2D: the five silent-failure spots now log through PlaybackLog (secrets redacted); no behaviour change.
+- Pack 2E: UI smoke tests (10) — Home, Library, Search, Player, Cached Songs, empty + populated.
+- Pack 3: playback speed + pitch 0.5x-2x with a pitch-preservation option (survives track changes); Save-queue-as-playlist from the queue screen; loudness normalisation + ReplayGain through ONE gain stage (ReplayGain wins when present; both Off by default; Settings > Sound > Volume levelling).
+- Pack 4: service ticker and position poll gated when idle (battery); true engine pass-through when every effect is off — buffers pass byte-identical (tested).
+- Pack 5 Part 1: personalised Home (time-aware greeting, Jump back in, Your top artists — rows hide until there is enough data) and a Wrapped Anytime stats screen (Week / Month / Year / All time: total plays, listening streak, top songs/artists, most repeated, favourite time of day), all from on-device stats.
+- Tests now 268 (0 failed, 9 skipped on the build machine). Source only — no release; version stays v1.05 / 35 until all packs are done.
 
 ## [v1.04] - 2026-11-11
 _Internal 1.0.9 · versionCode 34. A fix pack: no new features, nothing removed._
