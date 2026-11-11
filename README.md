@@ -34,11 +34,15 @@ The project also has an **experimental iOS build**: the Kotlin Multiplatform + C
 
 | Home | Explore | Library |
 |:---:|:---:|:---:|
-| <img src="docs/screenshots/preview-home.jpg" width="250" alt="UpZe — Home screen" /> | <img src="docs/screenshots/preview-explore.jpg" width="250" alt="UpZe — Explore screen" /> | <img src="docs/screenshots/preview-library.jpg" width="250" alt="UpZe — Library screen" /> |
+| <img src="docs/screenshots/preview-home.jpg" width="250" alt="UpZe — Home screen (personalised: greeting, continue listening, on repeat)" /> | <img src="docs/screenshots/preview-explore.jpg" width="250" alt="UpZe — Explore screen" /> | <img src="docs/screenshots/preview-library.jpg" width="250" alt="UpZe — Library screen" /> |
 
-| Now Playing | Motion Lyrics | Playlist |
+| Now Playing | Search | Settings |
 |:---:|:---:|:---:|
-| <img src="docs/screenshots/preview-now-playing.jpg" width="250" alt="UpZe — Now Playing screen" /> | <img src="docs/screenshots/motion-lyrics.gif" width="250" alt="UpZe — Motion Lyrics (animated)" /> | <img src="docs/screenshots/preview-playlist.jpg" width="250" alt="UpZe — Playlist screen" /> |
+| <img src="docs/screenshots/preview-now-playing.jpg" width="250" alt="UpZe — Now Playing screen" /> | <img src="docs/screenshots/preview-search.jpg" width="250" alt="UpZe — Search across sources" /> | <img src="docs/screenshots/preview-settings.jpg" width="250" alt="UpZe — Settings screen" /> |
+
+| Motion Lyrics | Lyrics |
+|:---:|:---:|
+| <img src="docs/screenshots/motion-lyrics.gif" width="250" alt="UpZe — Motion Lyrics (animated)" /> | <img src="docs/screenshots/preview-lyrics.jpg" width="250" alt="UpZe — Lyrics screen" /> |
 
 </div>
 
