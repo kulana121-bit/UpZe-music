@@ -11,7 +11,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
-[![Latest release](https://img.shields.io/badge/release-v1.03-FF5358)](https://github.com/kulana121-bit/UpZe-music/releases)
+[![Latest release](https://img.shields.io/badge/release-v1.04-FF5358)](https://github.com/kulana121-bit/UpZe-music/releases)
 
 [Download](https://github.com/kulana121-bit/UpZe-music/releases) · [Features](#features) · [Build](#build-from-source) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
