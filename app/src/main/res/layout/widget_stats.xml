@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pack 5 Part 2: "This week" stats card (Wrapped.summarize). Tap opens Your stats. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/s_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_bg">
+    <ImageView android:id="@+id/s_bg" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="fitXY" android:importantForAccessibility="no" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:gravity="center_vertical"
+        android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="10dp" android:paddingBottom="10dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="THIS WEEK" android:textSize="10sp" android:letterSpacing="0.16" android:textStyle="bold"
+            android:textColor="#B3FFFFFF" android:includeFontPadding="false" />
+        <LinearLayout android:id="@+id/s_numbers" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" android:orientation="horizontal" android:baselineAligned="false">
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+                <TextView android:id="@+id/s_plays" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="0" android:textSize="28sp" android:textStyle="bold" android:textColor="#FFFFFFFF"
+                    android:includeFontPadding="false" android:maxLines="1" />
+                <TextView android:id="@+id/s_plays_label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="plays" android:textSize="11sp" android:textColor="#CCFFFFFF" android:maxLines="1" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+                <TextView android:id="@+id/s_streak" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="0" android:textSize="28sp" android:textStyle="bold" android:textColor="#FFFFFFFF"
+                    android:includeFontPadding="false" android:maxLines="1" />
+                <TextView android:id="@+id/s_streak_label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="day streak" android:textSize="11sp" android:textColor="#CCFFFFFF" android:maxLines="1" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView android:id="@+id/s_top" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:textSize="12sp" android:textColor="#FFFFFFFF" android:maxLines="1" android:ellipsize="end"
+            android:drawableStart="@drawable/widget_ic_top" android:drawablePadding="6dp" android:gravity="center_vertical"
+            android:visibility="gone" />
+        <TextView android:id="@+id/s_empty" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:text="Play something — your week in music will appear here"
+            android:textSize="13sp" android:textColor="#E6FFFFFF" android:maxLines="3" android:ellipsize="end" android:visibility="gone" />
+    </LinearLayout>
+</FrameLayout>

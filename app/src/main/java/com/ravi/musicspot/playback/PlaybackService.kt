@@ -34,8 +34,12 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionError
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.SettableFuture
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.ravi.musicspot.Graph
@@ -51,6 +55,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -93,6 +98,13 @@ object Playback {
     val sleepTick = MutableStateFlow(0L)
     val engine = EngineAudioProcessor { Graph.settings.value.engine(Graph.lowEnd) }
     val bitPerfectStatus = MutableStateFlow<String?>(null)
+    /** Pack 6 Part 2: a beat-matched DJ transition is armed or running (the player shows a small "DJ" chip). */
+    val djArmed = MutableStateFlow(false)
+    /**
+     * Pack 6 Part 2: tempo stretch DJ Mode currently applies on top of the user's speed (1.0 = none). While it is not
+     * 1.0 the service owns the player's PlaybackParameters (PlayerConnection does not re-apply its own).
+     */
+    val djStretch = MutableStateFlow(1.0)
 }
 
 object TrackUri {
@@ -120,8 +132,13 @@ val MediaItem.isAutoplay: Boolean get() = mediaMetadata.extras?.getBoolean(EXTRA
 fun MediaItem.track(): Track? = mediaMetadata.extras?.getString("track")?.let { runCatching { Http.json.decodeFromString(Track.serializer(), it) }.getOrNull() }
     ?: (localConfiguration?.uri ?: requestMetadata.mediaUri)?.let(TrackUri::track)
 
-class PlaybackService : MediaSessionService() {
-    private var session: MediaSession? = null
+/**
+ * Pack 6 Part 1: a MediaLibraryService (was MediaSessionService). The session is a MediaLibrarySession whose callback
+ * keeps every MediaSession behaviour (onAddMediaItems, transport, session activity, SafePositionPlayer/fader) and adds
+ * the browse tree from [AutoBrowse] (Android Auto and any media browser): Liked songs, Playlists, History, On this device.
+ */
+class PlaybackService : MediaLibraryService() {
+    private var session: MediaLibrarySession? = null
     private lateinit var player: ExoPlayer
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.ravi.musicspot.core.BackgroundFaults)
@@ -167,20 +184,26 @@ class PlaybackService : MediaSessionService() {
     private val playerHandler by lazy { android.os.Handler(player.applicationLooper) }
     private var repeatPending = false
     private var pure = false
+    // ---- Pack 6 Part 2: DJ Mode ----
+    /** The resolving (TrackUri → stream, cached) data source factory, also read by the BPM analyser. */
+    private var resolvingFactory: androidx.media3.datasource.DataSource.Factory? = null
+    /** The player's media source factory, shared with the short-lived DJ deck. */
+    private var mediaSourceFactory: androidx.media3.exoplayer.source.MediaSource.Factory? = null
+    /** DJ handoff gain on the main player (0 while it re-buffers the incoming song under the deck). Main thread. */
+    private var djGain = 1f
+    private val dj = Dj()
 
     override fun onCreate() {
         super.onCreate()
         LoudnessStore.init(filesDir) // 1.0.10: measured loudness per track (normalisation)
+        dj.store = com.ravi.musicspot.data.BpmStore.init(filesDir) // Pack 6 Part 2: tempo per track (DJ Mode)
         pure = Graph.settings.value.pureHiRes || Graph.settings.value.bitPerfectUsb
         player = buildPlayer()
         current = this
         val open = PendingIntent.getActivity(this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra(MainActivity.EXTRA_OPEN_PLAYER, true),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        session = MediaSession.Builder(this, SafePositionPlayer(player, fader)).setSessionActivity(open).setCallback(object : MediaSession.Callback {
-            override fun onAddMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>): ListenableFuture<MutableList<MediaItem>> =
-                Futures.immediateFuture(mediaItems.map { item -> item.track()?.toMediaItem() ?: item }.toMutableList())
-        }).build()
+        session = MediaLibrarySession.Builder(this, SafePositionPlayer(player, fader), libraryCallback).setSessionActivity(open).build()
         player.addListener(listener)
         // v2.0.7 widget: buttons drive this player directly; the card follows the song and play state.
         com.ravi.musicspot.widget.NowPlayingWidget.Controls.handle = { a ->
@@ -235,8 +258,11 @@ class PlaybackService : MediaSessionService() {
         cacheFactory = cacheF // 1.0.6: also used to pre-buffer the next song's first chunk
         val cached: androidx.media3.datasource.DataSource.Factory = cacheF ?: upstream
         val resolving = ResolvingDataSource.Factory(cached) { spec -> resolveSpec(spec) }
+        resolvingFactory = resolving
+        val msf = DefaultMediaSourceFactory(resolving).setLoadErrorHandlingPolicy(SeamlessRetryPolicy(::onLoadRetry, ::onLoadExpired))
+        mediaSourceFactory = msf
         return ExoPlayer.Builder(this, renderers)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(resolving).setLoadErrorHandlingPolicy(SeamlessRetryPolicy(::onLoadRetry, ::onLoadExpired)))
+            .setMediaSourceFactory(msf)
             // v2.0.5 fast start: playback begins after ~1.2 s of audio (was ExoPlayer's 2.5 s), 2.5 s after a rebuffer.
             .setLoadControl(androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(15_000, 50_000, BUFFER_FOR_PLAYBACK_MS, 2_500)
@@ -740,9 +766,10 @@ class PlaybackService : MediaSessionService() {
 
     private var autoplayFor: String? = null
 
-    private fun saveQueue() {
+    /** [force] (Pack 6 queue switch only): also save an empty player, so a cleared queue stays cleared. */
+    private fun saveQueue(force: Boolean = false) {
         val n = player.mediaItemCount
-        if (n == 0) return
+        if (n == 0) { if (force) Graph.queueStore.save(QueueSnapshot(emptyList(), 0, 0, player.shuffleModeEnabled, player.repeatMode)); return }
         val tracks = (0 until n).mapNotNull { player.getMediaItemAt(it).track() }
         Graph.queueStore.save(QueueSnapshot(tracks.take(500), player.currentMediaItemIndex.coerceAtLeast(0), player.currentPosition, player.shuffleModeEnabled, player.repeatMode))
     }
@@ -782,7 +809,7 @@ class PlaybackService : MediaSessionService() {
 
     /** 1.0.6: the player's volume is the ticker's gain times the play/pause ramp's gain. Main thread. */
     private fun applyVolume() {
-        val v = (baseVolume * rampGain).coerceIn(0f, 1f)
+        val v = (baseVolume * rampGain * djGain).coerceIn(0f, 1f)
         if (player.volume != v) player.volume = v
     }
 
@@ -915,11 +942,16 @@ class PlaybackService : MediaSessionService() {
             if (fadeInFrom == 0L && player.isPlaying) fadeInFrom = now
             if (fadeInFrom > 0L) { val f = (now - fadeInFrom).toFloat() / FADE_IN_MS; if (f >= 1f) fadeInFrom = -1L else vol *= f.coerceIn(0.05f, 1f) }
             val cf = if (s.gapless) 0L else s.crossfadeSec * 1000L
+            // Pack 6 Part 2: a song a DJ transition handed over mid-way skips its own fade-in (the deck already faded it in).
+            val fadePos = if (dur > 0 && dj.skipsHeadFade(player.currentMediaItem?.mediaId)) maxOf(pos, cf) else pos
             // 1.0.6: equal-power curves (sin/cos) instead of linear ramps: the loudness no longer dips mid-fade.
-            if (dur > 0) vol *= com.ravi.musicspot.logic.Fades.crossfadeGain(pos, remaining, dur, cf)
-            fine = player.isPlaying && (fadeInFrom > 0L || (dur > 0 && com.ravi.musicspot.logic.Fades.inCrossfade(pos, remaining, dur, cf)))
+            if (dur > 0) vol *= com.ravi.musicspot.logic.Fades.crossfadeGain(fadePos, remaining, dur, cf)
+            fine = player.isPlaying && (fadeInFrom > 0L || (dur > 0 && com.ravi.musicspot.logic.Fades.inCrossfade(fadePos, remaining, dur, cf)))
             baseVolume = vol
             applyVolume()
+            // Pack 6 Part 2: DJ Mode (analysis, arming, the deck overlap and the handoff). No-op while it is off.
+            runCatching { dj.tick(s, now, pos, dur, remaining, cf) }.onFailure { CrashGuard.nonFatal(this@PlaybackService, "dj.tick", it); dj.abort("error") }
+            if (dj.needsFineTick()) fine = true
             // 1.0.6 zero-wait next track: at 80 % (or 20 s before the end) resolve the next song and cache its start.
             val curId = player.currentMediaItem?.mediaId
             if (curId != null && dur > 0 && player.isPlaying && prebufferedFor != curId && (pos >= dur * 8 / 10 || remaining <= PREBUFFER_BEFORE_END_MS)) {
@@ -938,7 +970,367 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    /**
+     * Pack 6 Part 2: DJ Mode. Beat-matched, tempo-matched transitions.
+     *
+     * While the outgoing song plays, both songs are analysed once (BpmStore). Near the crossfade window the transition is
+     * ARMED when both tempos are known and within ±6 % ([com.ravi.musicspot.logic.DjMode.tempoMatch]); otherwise the
+     * normal equal-power crossfade runs untouched at normal speed. Armed: a short-lived second ExoPlayer (the "deck")
+     * prepares the incoming song and starts it on the outgoing beat grid ([com.ravi.musicspot.logic.DjMode.plan]) at
+     * the matched speed, fading in while the main player fades the outgoing song out. A light phase lock (≤3 % speed
+     * nudges while the deck is quiet, ≤1 % after) keeps the beats together. Just before the outgoing song ends, the main
+     * player seeks (muted) to the incoming song at the deck's position, checks it is in step, and takes over with a
+     * 200 ms swap; the deck is released at once. The matched speed then eases back to the user's speed over
+     * [RAMP_BACK_MS]. Anything unexpected (pause, seek, skip, a deck that is not ready, drift) aborts to the plain
+     * crossfade. Main thread only.
+     */
+    private inner class Dj {
+        var store: com.ravi.musicspot.data.BpmStore? = null
+        private val requested: MutableSet<String> = Collections.synchronizedSet(HashSet())
+        private val analysisExec = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); r.run() }, "dj-bpm").apply { isDaemon = true }
+        }
+        private val analysis = CoroutineScope(SupervisorJob() + analysisExec.asCoroutineDispatcher() + com.ravi.musicspot.core.BackgroundFaults)
+
+        private inner class Armed(
+            val outId: String, val nextIndex: Int, val nextId: String, val outDur: Long,
+            val plan: com.ravi.musicspot.logic.DjMode.Plan, val deck: ExoPlayer,
+        ) { var startPosted = false; var lastPos = -1L; var lastNudge = 1.0 }
+        private inner class Handoff(val nextId: String, val deck: ExoPlayer, val stretch: Double, val startedAt: Long, var leadMs: Long) {
+            var retried = false; var swapping = false
+        }
+        private var armed: Armed? = null
+        private var handoff: Handoff? = null
+        private var skipHeadFor: String? = null
+        private var rampFrom = 1.0
+        private var rampStart = 0L
+        /** The song whose arming was already decided (armed or fell back) for this play. */
+        private var decidedFor: String? = null
+
+        fun active(s: com.ravi.musicspot.data.AppSettings) = s.djMode && !s.gapless && s.crossfadeSec > 0
+        fun skipsHeadFade(id: String?) = id != null && id == skipHeadFor
+        fun needsFineTick() = armed != null || handoff != null || rampStart > 0L
+
+        private fun userSpeed() = runCatching { Graph.player.speed.value }.getOrNull() ?: PlayerConnection.Speed()
+
+        private fun setMainStretch(stretch: Double) {
+            val sp = userSpeed()
+            val (speed, pitch) = com.ravi.musicspot.logic.DjMode.parameters(clampSpeed(sp.speed), sp.keepPitch, stretch)
+            Playback.djStretch.value = stretch
+            val want = androidx.media3.common.PlaybackParameters(speed, pitch)
+            if (player.playbackParameters != want) player.playbackParameters = want
+        }
+
+        fun tick(s: com.ravi.musicspot.data.AppSettings, now: Long, pos: Long, dur: Long, remaining: Long, cf: Long) {
+            // Ease the matched tempo back to the user's speed after a handoff (also when DJ Mode was just turned off).
+            if (rampStart > 0L) {
+                val t = ((now - rampStart).toDouble() / RAMP_BACK_MS).coerceIn(0.0, 1.0)
+                val st = rampFrom + (1.0 - rampFrom) * t
+                setMainStretch(if (t >= 1.0) 1.0 else st)
+                if (t >= 1.0) rampStart = 0L
+            }
+            if (!active(s)) { if (armed != null || handoff != null) abort("DJ Mode off"); return }
+            val curItem = player.currentMediaItem ?: return
+            val curId = curItem.mediaId
+            if (skipHeadFor != null && skipHeadFor != curId && handoff == null) skipHeadFor = null
+            if (player.isPlaying) {
+                ensureAnalysed(curItem.track(), dur)
+                val ni = player.nextMediaItemIndex
+                if (ni != C.INDEX_UNSET) player.getMediaItemAt(ni).track()?.let { ensureAnalysed(it, it.durationMs) }
+            }
+            handoff?.let { h -> stepHandoff(h, now); return }
+            val a = armed
+            if (a == null) {
+                if (decidedFor == curId || !player.isPlaying || dur <= 0 || remaining > cf + ARM_LEAD_MS) return
+                if (remaining < cf / 2) { decidedFor = curId; return } // too late to arm this time
+                tryArm(curId, dur, cf)
+                return
+            }
+            // Armed: still the same song, still playing forward, same next song?
+            if (curId != a.outId || !player.isPlaying || (a.lastPos >= 0 && pos < a.lastPos - 1_000) || player.nextMediaItemIndex != a.nextIndex) { abort("interrupted"); return }
+            a.lastPos = pos
+            val sp = userSpeed()
+            if (!a.startPosted && pos >= a.plan.outStartMs - START_POST_MS) {
+                a.startPosted = true
+                val delayMs = ((a.plan.outStartMs - pos) / clampSpeed(sp.speed).toDouble()).toLong() - DECK_START_LATENCY_MS
+                playerHandler.postDelayed({
+                    if (armed !== a) return@postDelayed
+                    if (a.deck.playbackState != Player.STATE_READY) { abort("deck not ready"); return@postDelayed }
+                    a.deck.play()
+                }, delayMs.coerceAtLeast(0))
+            }
+            if (a.startPosted && a.deck.isPlaying) {
+                // Phase lock: where the deck should be, from the outgoing position.
+                val expected = a.plan.inStartMs + (pos - a.plan.outStartMs) * a.plan.stretch
+                val err = a.deck.currentPosition - expected
+                if (kotlin.math.abs(err) > MAX_PHASE_ERR_MS) { abort("drift ${err.toLong()} ms"); return }
+                val g = com.ravi.musicspot.logic.Fades.rise(((pos - a.plan.outStartMs).toFloat() / (a.outDur - a.plan.outStartMs).coerceAtLeast(1)))
+                val cap = if (g < 0.5f) 0.03 else 0.01
+                val nudge = 1.0 - (err / 2_000.0).coerceIn(-cap, cap)
+                if (kotlin.math.abs(nudge - a.lastNudge) > 0.0015) {
+                    a.lastNudge = nudge
+                    val (speed, pitch) = com.ravi.musicspot.logic.DjMode.parameters(clampSpeed(sp.speed), sp.keepPitch, a.plan.stretch * nudge)
+                    a.deck.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
+                }
+                a.deck.volume = (g * rampGain).coerceIn(0f, 1f)
+                if (remaining <= HANDOFF_BEFORE_END_MS * clampSpeed(sp.speed)) beginHandoff(a, now)
+            }
+        }
+
+        private fun tryArm(curId: String, dur: Long, cf: Long) {
+            decidedFor = curId
+            val st = store ?: return
+            if (player.repeatMode == Player.REPEAT_MODE_ONE || Playback.sleep.mode != SleepTimer.Mode.OFF) return
+            if (dur <= cf * 3) return // the crossfade itself skips songs this short
+            val ni = player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: return
+            val nextItem = player.getMediaItemAt(ni)
+            val next = nextItem.track() ?: return
+            val cur = player.currentMediaItem?.track() ?: return
+            if (cur.source.isLive || next.source.isLive || next.id == curId) return
+            val outB = st.beats(curId)
+            val inB = st.beats(next.id)
+            val match = com.ravi.musicspot.logic.DjMode.tempoMatch(outB?.tailBpm, inB?.bpm)
+            if (!match.matched || outB == null || inB == null) {
+                com.ravi.musicspot.core.PlaybackLog.add("DJ: plain crossfade (${match.reason})"); return
+            }
+            val plan = com.ravi.musicspot.logic.DjMode.plan(outB, dur, dur - cf, inB, match.stretch)
+                ?: run { com.ravi.musicspot.core.PlaybackLog.add("DJ: plain crossfade (no beat in the window)"); return }
+            val deck = buildDeck() ?: return
+            val sp = userSpeed()
+            val (speed, pitch) = com.ravi.musicspot.logic.DjMode.parameters(clampSpeed(sp.speed), sp.keepPitch, match.stretch)
+            deck.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
+            deck.volume = 0f
+            deck.setMediaItem(nextItem, plan.inStartMs)
+            deck.playWhenReady = false
+            deck.prepare()
+            armed = Armed(curId, ni, next.id, dur, plan, deck)
+            Playback.djArmed.value = true
+            com.ravi.musicspot.core.PlaybackLog.add("DJ: armed ${"%.1f".format(java.util.Locale.ROOT, outB.tailBpm)} → ${"%.1f".format(java.util.Locale.ROOT, inB.bpm)} BPM, stretch ${"%.3f".format(java.util.Locale.ROOT, match.stretch)}, start at ${plan.outStartMs / 1000.0} s")
+        }
+
+        /** The deck: a bare ExoPlayer on the same media source factory. No audio focus (it would pause the main player). */
+        private fun buildDeck(): ExoPlayer? = runCatching {
+            val engine = if (pure) null else EngineAudioProcessor { Graph.settings.value.engine(Graph.lowEnd) }
+            val renderers = object : DefaultRenderersFactory(this@PlaybackService) {
+                override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink =
+                    DefaultAudioSink.Builder(context).setEnableFloatOutput(pure)
+                        .setAudioProcessors(if (engine == null) emptyArray() else arrayOf(engine)).build()
+            }.setEnableDecoderFallback(true)
+            val b = ExoPlayer.Builder(this@PlaybackService, renderers)
+                .setLooper(player.applicationLooper)
+                .setLoadControl(androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(4_000, 12_000, 1_000, 1_000).build())
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), false)
+            mediaSourceFactory?.let { b.setMediaSourceFactory(it) }
+            b.build()
+        }.onFailure { CrashGuard.nonFatal(this@PlaybackService, "dj.buildDeck", it) }.getOrNull()
+
+        private fun beginHandoff(a: Armed, now: Long) {
+            armed = null
+            setMainStretch(a.plan.stretch)
+            skipHeadFor = a.nextId
+            djGain = 0f; applyVolume()
+            val h = Handoff(a.nextId, a.deck, a.plan.stretch, now, HANDOFF_LEAD_MS)
+            handoff = h
+            player.seekTo(a.nextIndex, a.deck.currentPosition + h.leadMs)
+        }
+
+        private fun stepHandoff(h: Handoff, now: Long) {
+            if (h.swapping) return
+            h.deck.volume = rampGain.coerceIn(0f, 1f)
+            if (!player.playWhenReady) { finishHandoff(h, "paused"); return }
+            if (player.currentMediaItem?.mediaId != h.nextId || now - h.startedAt > HANDOFF_TIMEOUT_MS) { finishHandoff(h, "handoff ${if (now - h.startedAt > HANDOFF_TIMEOUT_MS) "timed out" else "interrupted"}"); return }
+            if (!player.isPlaying || player.playbackState != Player.STATE_READY) return
+            val d = player.currentPosition - h.deck.currentPosition
+            if (kotlin.math.abs(d) > IN_STEP_MS && !h.retried) {
+                h.retried = true
+                h.leadMs = (h.leadMs - d).coerceIn(0, 1_500)
+                player.seekTo(h.deck.currentPosition + h.leadMs)
+                return
+            }
+            h.swapping = true
+            scope.launch {
+                val t0 = android.os.SystemClock.uptimeMillis()
+                while (true) {
+                    val t = (android.os.SystemClock.uptimeMillis() - t0).toFloat() / SWAP_MS
+                    if (t >= 1f || handoff !== h) break
+                    djGain = com.ravi.musicspot.logic.Fades.rise(t); applyVolume()
+                    h.deck.volume = (com.ravi.musicspot.logic.Fades.fall(t) * rampGain).coerceIn(0f, 1f)
+                    delay(com.ravi.musicspot.logic.Fades.RAMP_STEP_MS)
+                }
+                if (handoff === h) finishHandoff(h, "done (in step within ${kotlin.math.abs(d)} ms)")
+            }
+        }
+
+        private fun finishHandoff(h: Handoff, why: String) {
+            handoff = null
+            runCatching { h.deck.release() }
+            djGain = 1f; applyVolume()
+            Playback.djArmed.value = false
+            rampFrom = h.stretch; rampStart = System.currentTimeMillis()
+            if (rampFrom == 1.0) { rampStart = 0L; setMainStretch(1.0) }
+            com.ravi.musicspot.core.PlaybackLog.add("DJ: handoff $why")
+        }
+
+        /** Back to the plain crossfade: the deck goes, the main player keeps going untouched. */
+        fun abort(why: String) {
+            armed?.let { a -> armed = null; runCatching { a.deck.release() }; com.ravi.musicspot.core.PlaybackLog.add("DJ: fell back to the plain crossfade ($why)") }
+            handoff?.let { h -> finishHandoff(h, "aborted ($why)") }
+            if (djGain != 1f) { djGain = 1f; applyVolume() }
+            Playback.djArmed.value = false
+        }
+
+        /** Analyses [t] once in the background (never a cached track; a failure is retried after the service restarts). */
+        private fun ensureAnalysed(t: Track?, durHint: Long) {
+            t ?: return
+            if (t.source.isLive) return
+            val st = store ?: return
+            if (!st.loaded || st.has(t.id) || !requested.add(t.id)) return
+            val factory = resolvingFactory ?: return
+            analysis.launch {
+                val src = com.ravi.musicspot.data.Media3MediaDataSource(factory, TrackUri.of(t))
+                val out = try { com.ravi.musicspot.data.BpmAnalyzer.analyze(src, durHint) } finally { runCatching { src.close() } }
+                when (out) {
+                    is com.ravi.musicspot.data.BpmAnalyzer.Outcome.Done -> {
+                        st.put(t.id, out.beats)
+                        com.ravi.musicspot.core.PlaybackLog.add("DJ: \"${t.title.take(30)}\" " + (out.beats?.let { "${"%.1f".format(java.util.Locale.ROOT, it.bpm)} BPM" } ?: "tempo unknown"))
+                    }
+                    is com.ravi.musicspot.data.BpmAnalyzer.Outcome.Failed -> com.ravi.musicspot.core.PlaybackLog.add("DJ: could not analyse \"${t.title.take(30)}\" (${out.why})")
+                }
+            }
+        }
+
+        fun release() {
+            abort("service stopped")
+            if (rampStart > 0L) { rampStart = 0L; Playback.djStretch.value = 1.0 }
+            analysis.cancel()
+            analysisExec.shutdownNow()
+        }
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
+
+    // ---- Pack 6 Part 1: browse tree (Android Auto / media browsers) ----
+
+    /** The user's own library as [AutoBrowse] data: Liked, playlists, History (newest first), downloaded + cached songs. */
+    private fun autoLib(): AutoBrowse.Lib {
+        val d = Graph.library.data.value
+        val downloaded = runCatching { Graph.downloads.items.value.values.filter { it.state == com.ravi.musicspot.data.DownloadEntry.State.DONE }.sortedByDescending { it.atMs }.map { it.track } }.getOrDefault(emptyList())
+        val cached = runCatching { Graph.cached.complete.value.sortedByDescending { it.atMs }.map { it.track } }.getOrDefault(emptyList())
+        return AutoBrowse.Lib(
+            liked = d.liked,
+            playlists = d.playlists.map { AutoBrowse.Playlist(it.id, it.name, it.tracks, it.artUrl) },
+            history = d.history.map { it.track },
+            device = (downloaded + cached).distinctBy { it.id },
+        )
+    }
+
+    private fun AutoBrowse.Node.toMediaItem(): MediaItem {
+        val type = when (kind) {
+            AutoBrowse.Kind.ROOT -> MediaMetadata.MEDIA_TYPE_FOLDER_MIXED
+            AutoBrowse.Kind.SECTION -> if (id == AutoBrowse.PLAYLISTS) MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS else MediaMetadata.MEDIA_TYPE_PLAYLIST
+            AutoBrowse.Kind.PLAYLIST -> MediaMetadata.MEDIA_TYPE_PLAYLIST
+            AutoBrowse.Kind.SONG -> MediaMetadata.MEDIA_TYPE_MUSIC
+        }
+        val md = MediaMetadata.Builder().setTitle(title).setSubtitle(subtitle).setArtist(track?.artist).setAlbumTitle(track?.album)
+            .setArtworkUri(artUrl?.let(Uri::parse)).setIsBrowsable(browsable).setIsPlayable(playable).setMediaType(type).build()
+        return MediaItem.Builder().setMediaId(id).setMediaMetadata(md).build()
+    }
+
+    /** Runs [block] once the stores have loaded (a head unit can start the service cold), on the main thread. */
+    private fun <T> afterReady(block: () -> T): ListenableFuture<T> {
+        val f = SettableFuture.create<T>()
+        scope.launch {
+            try { Graph.awaitReady(); f.set(block()) } catch (t: Throwable) { if (t is kotlinx.coroutines.CancellationException) f.cancel(false) else f.setException(t) }
+        }
+        return f
+    }
+
+    private val libraryCallback = object : MediaLibrarySession.Callback {
+        override fun onAddMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>): ListenableFuture<MutableList<MediaItem>> {
+            // Unchanged for the app's own items; a browse-tree song (mediaId only, no extras) resolves to its track.
+            if (mediaItems.none { it.track() == null && AutoBrowse.isPlayable(it.mediaId) })
+                return Futures.immediateFuture(mediaItems.map { item -> item.track()?.toMediaItem() ?: item }.toMutableList())
+            return afterReady {
+                val lib = autoLib()
+                mediaItems.mapNotNull { item ->
+                    item.track()?.toMediaItem() ?: if (AutoBrowse.isPlayable(item.mediaId)) AutoBrowse.node(lib, item.mediaId)?.track?.toMediaItem() else item
+                }.toMutableList()
+            }
+        }
+
+        /** A browse-tree song plays its parent (Liked, a playlist, History, On this device) starting at that song. */
+        override fun onSetMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val one = mediaItems.singleOrNull()
+            if (one == null || one.track() != null || !AutoBrowse.isPlayable(one.mediaId))
+                return super.onSetMediaItems(mediaSession, controller, mediaItems, startIndex, startPositionMs)
+            return afterReady {
+                val play = AutoBrowse.resolve(autoLib(), one.mediaId) ?: throw UnsupportedOperationException("This song is no longer in that list")
+                MediaSession.MediaItemsWithStartPosition(play.tracks.map { it.toMediaItem() }, play.start, C.TIME_UNSET)
+            }
+        }
+
+        override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?): ListenableFuture<LibraryResult<MediaItem>> {
+            // No "recent" root (playback resumption is the restored queue, not a browse node).
+            if (params?.isRecent == true) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_NOT_SUPPORTED))
+            return Futures.immediateFuture(LibraryResult.ofItem(AutoBrowse.Node(AutoBrowse.ROOT, "UpZe", kind = AutoBrowse.Kind.ROOT).toMediaItem(), params))
+        }
+
+        override fun onGetChildren(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams?): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = afterReady {
+            val kids = AutoBrowse.children(autoLib(), parentId)
+            if (kids == null) LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+            else LibraryResult.ofItemList(AutoBrowse.page(kids, page, pageSize).map { it.toMediaItem() }, params)
+        }
+
+        override fun onGetItem(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String): ListenableFuture<LibraryResult<MediaItem>> = afterReady {
+            AutoBrowse.node(autoLib(), mediaId)?.let { LibraryResult.ofItem(it.toMediaItem(), null) } ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+        }
+
+        override fun onSearch(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, params: LibraryParams?): ListenableFuture<LibraryResult<Void>> = afterReady {
+            session.notifySearchResultChanged(browser, query, AutoBrowse.search(autoLib(), query).size, params)
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, page: Int, pageSize: Int, params: LibraryParams?): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = afterReady {
+            LibraryResult.ofItemList(AutoBrowse.page(AutoBrowse.search(autoLib(), query), page, pageSize).map { it.toMediaItem() }, params)
+        }
+    }
+
+    // ---- Pack 6 Part 1: multiple queues (player thread) ----
+
+    /**
+     * Switches the player to queue [id]: the current queue's state (tracks, index, position, shuffle, repeat) is saved
+     * into the active queue first, then [id] becomes active and its saved state is loaded. Play/pause is kept.
+     * Main thread (the player's looper); PlayerConnection calls it there.
+     */
+    internal fun switchQueue(id: String): Boolean {
+        val store = Graph.queueStore
+        val set = store.state.value
+        if (set.queues.none { it.id == id }) return false
+        if (set.active == id) return true
+        saveQueue(force = true)
+        store.setActive(id)
+        val snap = store.queue(id)?.snapshot ?: QueueSnapshot()
+        val wasPlaying = player.playWhenReady
+        autoplayFor = null
+        if (snap.tracks.isEmpty()) { player.stop(); player.clearMediaItems() }
+        else {
+            player.setMediaItems(snap.tracks.map { it.toMediaItem() }, snap.index.coerceIn(0, snap.tracks.lastIndex), snap.positionMs)
+            player.shuffleModeEnabled = snap.shuffle
+            player.repeatMode = snap.repeat
+            player.prepare()
+            player.playWhenReady = wasPlaying
+        }
+        return true
+    }
+
+    /** Deletes queue [id] (never the last). Deleting the active queue switches to the next (else previous) one first. */
+    internal fun deleteQueue(id: String): Boolean {
+        val store = Graph.queueStore
+        val set = store.state.value
+        if (set.queues.size <= 1) return false
+        if (set.active == id) { val other = com.ravi.musicspot.data.QueueSets.fallbackFor(set, id) ?: return false; if (!switchQueue(other)) return false }
+        return store.delete(id)
+    }
 
     private var stoppedByTaskRemoval = false
 
@@ -983,6 +1375,7 @@ class PlaybackService : MediaSessionService() {
         runCatching { com.ravi.musicspot.together.ListenTogether.onServiceDestroyed() } // 1.0.5: close the relay stream + its coroutines
         if (::player.isInitialized) runCatching { tidyHandler.removeCallbacksAndMessages(null); playerHandler.removeCallbacksAndMessages(null) } // 1.0.5
         synchronized(inflight) { inflight.values.forEach { it.cancel() }; inflight.clear() }
+        runCatching { dj.release() } // Pack 6 Part 2: the DJ deck and the analysis thread
         scope.cancel(); io.cancel()
         if (current === this) current = null
         if (::player.isInitialized) runCatching { player.release() } // v2.0.14: guard lateinit
@@ -1084,6 +1477,25 @@ class PlaybackService : MediaSessionService() {
         internal const val PREBUFFER_BEFORE_END_MS = 20_000L
         /** 1.0.6: the first chunk of the next song written to the media cache ahead of time (~16-30 s of audio). */
         internal const val PREBUFFER_BYTES = 512L * 1024
+        // ---- Pack 6 Part 2: DJ Mode timing ----
+        /** Arm (prepare the deck) this long before the crossfade window opens. */
+        internal const val ARM_LEAD_MS = 6_000L
+        /** The deck's exact start is posted this long ahead (the ticker runs every 40 ms while armed). */
+        internal const val START_POST_MS = 400L
+        /** Assumed time from deck.play() to audible output; the phase lock corrects what is left. */
+        internal const val DECK_START_LATENCY_MS = 60L
+        /** Beyond this beat error the transition gives up and falls back to the plain crossfade. */
+        internal const val MAX_PHASE_ERR_MS = 400.0
+        /** The main player takes the incoming song over this long before the outgoing one ends. */
+        internal const val HANDOFF_BEFORE_END_MS = 350L
+        /** First guess of how far ahead of the deck the main player seeks (it re-buffers meanwhile). */
+        internal const val HANDOFF_LEAD_MS = 250L
+        /** Main and deck closer than this count as in step; the swap is then inaudible. */
+        internal const val IN_STEP_MS = 40L
+        internal const val SWAP_MS = 200f
+        internal const val HANDOFF_TIMEOUT_MS = 4_000L
+        /** After a handoff the matched tempo eases back to the user's speed over this long. */
+        internal const val RAMP_BACK_MS = 8_000L
         /** Test hook: the service's player (main thread only). */
         @Volatile internal var current: PlaybackService? = null
 

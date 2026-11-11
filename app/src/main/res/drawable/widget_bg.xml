@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Shown only until the first render (and in the picker preview); same radius as WidgetCard.RADIUS_DP. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <corners android:radius="28dp" />
+    <corners android:radius="22dp" />
     <gradient android:angle="315" android:startColor="#FF2A1215" android:endColor="#FF0E0A0B" />
 </shape>

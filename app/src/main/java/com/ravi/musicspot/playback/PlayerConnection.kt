@@ -62,7 +62,9 @@ class PlayerConnection(private val ctx: Context) {
 
     private fun applySpeed(c: MediaController) {
         val s = _speed.value
-        val want = PlaybackParameters(s.speed, s.pitch)
+        // Pack 6 Part 2: DJ Mode's tempo match multiplies the user's speed; the user's pitch choice is kept as is.
+        val (speed, pitch) = com.ravi.musicspot.logic.DjMode.parameters(s.speed, s.keepPitch, Playback.djStretch.value)
+        val want = PlaybackParameters(speed, pitch)
         if (c.playbackParameters != want && c.isCommandAvailable(Player.COMMAND_SET_SPEED_AND_PITCH)) c.playbackParameters = want
     }
     /** 1.0.10 test hook (UI smoke tests only): publishes a player state without a MediaController. */
@@ -128,7 +130,10 @@ class PlayerConnection(private val ctx: Context) {
         _state.value = State(q, c.currentMediaItemIndex.takeIf { q.isNotEmpty() } ?: -1, c.isPlaying, c.playbackState == Player.STATE_BUFFERING,
             c.shuffleModeEnabled, c.repeatMode, c.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: (q.getOrNull(c.currentMediaItemIndex)?.durationMs ?: 0),
             (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).isAutoplay } ?: -1)
-        applySpeed(c) // 1.0.10: keep the session's speed if the player was rebuilt (no-op when it already matches)
+        // 1.0.10: keep the session's speed if the player was rebuilt (no-op when it already matches).
+        // Pack 6 Part 2: not while a DJ tempo match is easing (the service owns the speed then; re-applying a lagging
+        // controller value would fight the ramp).
+        if (Playback.djStretch.value == 1.0) applySpeed(c)
     }
 
     /**
@@ -192,6 +197,43 @@ class PlayerConnection(private val ctx: Context) {
     // ---- sleep timer ------------------------------------------------------------------------------------------
     fun sleepFor(minutes: Int) { Playback.sleep.startDuration(minutes * 60_000L, System.currentTimeMillis()); Playback.sleepTick.value = System.currentTimeMillis() }
     fun sleepEndOfTrack() { Playback.sleep.startEndOfTrack(); Playback.sleepTick.value = System.currentTimeMillis() }
+    // ---- Pack 6 Part 1: multiple queues ----
+
+    /** Every saved queue and which one is active. */
+    val queues: StateFlow<com.ravi.musicspot.data.QueueSet> get() = com.ravi.musicspot.Graph.queueStore.state
+
+    /** Saves the current queue, then loads [id] into the player (PlaybackService.switchQueue, on the main thread). */
+    fun switchQueue(id: String) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { main.post { switchQueue(id) }; return }
+        val svc = PlaybackService.current
+        if (svc != null) runCatching { svc.switchQueue(id) }.onFailure { com.ravi.musicspot.core.CrashGuard.nonFatal(ctx, "switchQueue", it) }
+        else com.ravi.musicspot.Graph.queueStore.setActive(id) // no player yet: it restores the active queue when it starts
+    }
+
+    /** A new empty queue (not switched to). Null when 10 queues exist. */
+    fun newQueue(): String? = com.ravi.musicspot.Graph.queueStore.create()
+
+    /** A copy of the current queue (songs, position, shuffle, repeat) as a new queue, not switched to. Null at the cap. */
+    fun copyCurrentQueue(): String? {
+        val s = _state.value
+        val store = com.ravi.musicspot.Graph.queueStore
+        val name = store.state.value.activeQueue?.name?.let { "Copy of $it" }
+        return store.create(name, com.ravi.musicspot.data.QueueSnapshot(s.queue.take(500), s.index.coerceAtLeast(0), _position.value, s.shuffle, s.repeat))
+    }
+
+    fun renameQueue(id: String, name: String) = com.ravi.musicspot.Graph.queueStore.rename(id, name)
+
+    /** Never the last queue; the active one switches to the next (else previous) queue first. */
+    fun deleteQueue(id: String) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { main.post { deleteQueue(id) }; return }
+        val store = com.ravi.musicspot.Graph.queueStore
+        val svc = PlaybackService.current
+        if (svc != null) { runCatching { svc.deleteQueue(id) }.onFailure { com.ravi.musicspot.core.CrashGuard.nonFatal(ctx, "deleteQueue", it) }; return }
+        val set = store.state.value
+        if (set.active == id) com.ravi.musicspot.data.QueueSets.fallbackFor(set, id)?.let { store.setActive(it) }
+        store.delete(id)
+    }
+
     fun sleepEndOfQueue() { Playback.sleep.startEndOfQueue(); Playback.sleepTick.value = System.currentTimeMillis() }
     fun sleepAdjust(minutes: Int) { Playback.sleep.adjust(minutes * 60_000L, System.currentTimeMillis()); Playback.sleepTick.value = System.currentTimeMillis() }
     fun sleepCancel() { Playback.sleep.cancel(); Playback.sleepTick.value = System.currentTimeMillis(); run { it.volume = 1f } }

@@ -72,12 +72,18 @@
             android:launchMode="singleTask"
             android:theme="@android:style/Theme.Material.NoActionBar" />
 
+        <!-- Pack 6: Android Auto media app (browse tree + playback from PlaybackService). -->
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+
         <service
             android:name=".playback.PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
+                <!-- Pack 6: MediaLibraryService (browse tree); MediaSessionService kept; MediaBrowserService for Android Auto / legacy browsers. -->
+                <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 
@@ -96,6 +102,34 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_now_playing_info" />
+        </receiver>
+        <!-- Pack 5 Part 2 widgets -->
+        <receiver
+            android:name=".widget.NowPlayingCompactWidget"
+            android:exported="true"
+            android:label="UpZe mini player">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_now_playing_compact_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.StatsWidget"
+            android:exported="true"
+            android:label="UpZe this week">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_stats_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.ShortcutsWidget"
+            android:exported="true"
+            android:label="UpZe shortcuts">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_shortcuts_info" />
         </receiver>
 
         <!-- 1.0.0 updater: content:// URI for the downloaded APK (cacheDir/updates only). -->

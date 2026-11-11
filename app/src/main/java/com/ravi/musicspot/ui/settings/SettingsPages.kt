@@ -173,6 +173,16 @@ fun PlaybackPage() {
                 RowDivider()
                 SliderRow("Crossfade", s.crossfadeSec.toFloat(), 0f..12f, if (s.gapless || s.crossfadeSec == 0) "Off" else "${s.crossfadeSec} s", steps = 11, enabled = !s.gapless,
                     subtitle = if (s.gapless) "Off while gapless is on" else "Fades out the end of a song and fades in the next") { v -> Graph.settings.update { it.copy(crossfadeSec = v.roundToInt()) } }
+                RowDivider()
+                // Pack 6 Part 2: DJ Mode. Turning it on switches gapless off and makes sure there is a crossfade window
+                // (8 s when it was shorter than 6 s); turning it off leaves gapless and crossfade as they are.
+                SwitchRow("DJ Mode",
+                    when {
+                        s.djMode && (s.gapless || s.crossfadeSec == 0) -> "Waiting: needs crossfade on (gapless off)"
+                        else -> "Beat-matched transitions: the next song starts on the beat, tempo matched within ±6%. Songs without a clear beat get the normal crossfade."
+                    }, s.djMode) { v ->
+                    Graph.settings.update { if (v) it.copy(djMode = true, gapless = false, crossfadeSec = if (it.crossfadeSec < 6) 8 else it.crossfadeSec) else it.copy(djMode = false) }
+                }
             }
         }
         item(key = "settingspages-9", contentType = "static") {

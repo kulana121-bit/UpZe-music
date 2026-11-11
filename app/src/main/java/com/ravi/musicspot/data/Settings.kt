@@ -107,6 +107,11 @@ data class AppSettings(
     val crossfadeSec: Int = 0,
     /** Gapless (ExoPlayer's default gapless metadata handling). While on, crossfade is not applied. */
     val gapless: Boolean = true,
+    /**
+     * Pack 6 Part 2: DJ Mode (Settings › Playback), off by default. Beat-matched, tempo-matched transitions on top of
+     * the crossfade, so it needs gapless off and a crossfade length (the toggle sets both when turned on).
+     */
+    val djMode: Boolean = false,
     /** Duration offered first (and used by the one-tap "Default" chip) in the sleep timer. */
     val sleepDefaultMin: Int = 30,
     val autoplay: Boolean = true,

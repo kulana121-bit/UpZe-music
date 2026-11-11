@@ -149,15 +149,148 @@ class LibraryRepo(dir: File) {
 @Serializable
 data class QueueSnapshot(val tracks: List<Track> = emptyList(), val index: Int = 0, val positionMs: Long = 0, val shuffle: Boolean = false, val repeat: Int = 0)
 
-/** Queue persistence: restored on the next start (also for media-button resumption). */
+/** Pack 6: one named queue (its own tracks, index, position, shuffle and repeat: the fields QueueSnapshot carries). */
+@Serializable
+data class NamedQueue(val id: String, val name: String, val snapshot: QueueSnapshot = QueueSnapshot())
+
+/** Pack 6: up to [QueueSets.MAX] named queues; [active] is the one in the player. */
+@Serializable
+data class QueueSet(val active: String = QueueSets.DEFAULT_ID, val queues: List<NamedQueue> = listOf(NamedQueue(QueueSets.DEFAULT_ID, QueueSets.DEFAULT_NAME))) {
+    val activeQueue: NamedQueue? get() = queues.firstOrNull { it.id == active } ?: queues.firstOrNull()
+}
+
+/** Pack 6: pure multi-queue rules (unit-tested). Every function returns the same instance when nothing changes. */
+object QueueSets {
+    const val MAX = 10
+    const val DEFAULT_ID = "q-default"
+    const val DEFAULT_NAME = "My queue"
+
+    /** The legacy single queue (queue.json) becomes "My queue", active, unchanged. */
+    fun migrate(legacy: QueueSnapshot?): QueueSet = QueueSet(DEFAULT_ID, listOf(NamedQueue(DEFAULT_ID, DEFAULT_NAME, legacy ?: QueueSnapshot())))
+
+    /** Repairs a set read from disk: at least one queue, unique ids, at most MAX, active pointing at a real queue. */
+    fun sane(s: QueueSet): QueueSet {
+        val qs = s.queues.distinctBy { it.id }.take(MAX).ifEmpty { listOf(NamedQueue(DEFAULT_ID, DEFAULT_NAME)) }
+        val active = if (qs.any { it.id == s.active }) s.active else qs.first().id
+        return if (qs == s.queues && active == s.active) s else QueueSet(active, qs)
+    }
+
+    /** The active queue's state is replaced (the player saved it). */
+    fun saveActive(s: QueueSet, snap: QueueSnapshot): QueueSet {
+        val a = s.activeQueue ?: return s
+        if (a.snapshot == snap) return s
+        return s.copy(queues = s.queues.map { if (it.id == a.id) it.copy(snapshot = snap) else it })
+    }
+
+    /** "Queue 2", "Queue 3", … : the first name not taken. */
+    fun nextName(s: QueueSet): String = generateSequence(2) { it + 1 }.map { "Queue $it" }.first { n -> s.queues.none { it.name.equals(n, ignoreCase = true) } }
+
+    /** Adds a queue (not active). Null when the cap is reached. */
+    fun create(s: QueueSet, id: String, name: String?, snap: QueueSnapshot = QueueSnapshot()): QueueSet? {
+        if (s.queues.size >= MAX || s.queues.any { it.id == id }) return null
+        return s.copy(queues = s.queues + NamedQueue(id, name?.trim()?.takeIf { it.isNotEmpty() }?.take(40) ?: nextName(s), snap))
+    }
+
+    fun rename(s: QueueSet, id: String, name: String): QueueSet {
+        val n = name.trim().take(40)
+        if (n.isEmpty() || s.queues.none { it.id == id && it.name != n }) return s
+        return s.copy(queues = s.queues.map { if (it.id == id) it.copy(name = n) else it })
+    }
+
+    fun setActive(s: QueueSet, id: String): QueueSet = if (s.active == id || s.queues.none { it.id == id }) s else s.copy(active = id)
+
+    /** Deletes a queue. Refused (null) for the last queue and for the active one (switch away first). */
+    fun delete(s: QueueSet, id: String): QueueSet? {
+        if (s.queues.size <= 1 || id == s.active || s.queues.none { it.id == id }) return null
+        return s.copy(queues = s.queues.filterNot { it.id == id })
+    }
+
+    /** The queue to switch to before deleting [id]: the next one in the list, else the previous one. */
+    fun fallbackFor(s: QueueSet, id: String): String? {
+        val i = s.queues.indexOfFirst { it.id == id }
+        if (i < 0 || s.queues.size <= 1) return null
+        return (s.queues.getOrNull(i + 1) ?: s.queues[i - 1]).id
+    }
+}
+
+/**
+ * Queue persistence: restored on the next start (also for media-button resumption).
+ *
+ * Pack 6: holds up to 10 named queues in queues.json (each with its own tracks, index, position, shuffle, repeat);
+ * [read]/[load]/[save] still mean "the active queue", so every existing call site (PlaybackService restore, the
+ * periodic position save, Backup) works unchanged. On the first read, an existing queue.json (the old single queue)
+ * becomes the active "My queue" exactly as it was. queue.json keeps being written with the active queue, so an
+ * older UpZe installed over this one still restores the queue the user was on.
+ */
 class QueueStore(dir: File) {
     // 1.0.5: written even when it was never read this session (restore is skipped when something already plays).
-    private val file = JsonFile(File(dir, "queue.json"), QueueSnapshot.serializer(), debounceMs = 1500, holdWritesUntilRead = false)
-    /** Blocking: background thread only (PlaybackService.restoreQueue and Backup call it on Dispatchers.IO). */
-    fun read(): QueueSnapshot? = file.read()
-    /** 1.0.5: suspending read on Dispatchers.IO. */
-    suspend fun load(): QueueSnapshot? = file.load()
-    fun save(s: QueueSnapshot) = file.save { s }
+    private val legacy = JsonFile(File(dir, "queue.json"), QueueSnapshot.serializer(), debounceMs = 1500, holdWritesUntilRead = false)
+    // Pack 6: held until read; edits made before the read are replayed on top of what was on disk (no lost queues).
+    private val file = JsonFile(File(dir, "queues.json"), QueueSet.serializer(), debounceMs = 1500, holdWritesUntilRead = true)
+    private val lock = Any()
+    @Volatile private var loaded = false
+    private val beforeLoad = mutableListOf<(QueueSet) -> QueueSet>()
+    private val _state = MutableStateFlow(QueueSet())
+    /** All queues and which one is active (for the Queues sheet). */
+    val state: StateFlow<QueueSet> = _state
+
+    init { IoScope.launch { runCatching { ensureLoaded() } } } // read once in the background; no call site has to
+
+    /** Blocking: background thread only. Reads queues.json, or migrates queue.json on the first start after the update. */
+    private fun ensureLoaded() {
+        if (loaded) return
+        synchronized(lock) {
+            if (loaded) return
+            val disk = file.read()
+            val migrated = disk == null
+            val base = QueueSets.sane(disk ?: QueueSets.migrate(legacy.read()))
+            _state.value = beforeLoad.fold(base) { s, f -> f(s) }
+            beforeLoad.clear(); loaded = true
+            if (migrated || _state.value !== base || base !== disk) file.save { _state.value }
+        }
+    }
+
+    private fun edit(f: (QueueSet) -> QueueSet): QueueSet {
+        val out = synchronized(lock) {
+            val before = _state.value
+            val after = f(before)
+            if (!loaded) beforeLoad += f
+            _state.value = after
+            if (after === before) return after
+            after
+        }
+        file.save { _state.value }
+        out.activeQueue?.snapshot?.let { snap -> legacy.save { snap } }
+        return out
+    }
+
+    /** Blocking: background thread only (PlaybackService.restoreQueue and Backup call it on Dispatchers.IO). The active queue. */
+    fun read(): QueueSnapshot? { ensureLoaded(); return _state.value.activeQueue?.snapshot?.takeIf { it.tracks.isNotEmpty() } }
+    /** 1.0.5: suspending read on Dispatchers.IO. The active queue. */
+    suspend fun load(): QueueSnapshot? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { read() }
+    /** Pack 6: every queue (Backup). Blocking: background thread only. */
+    fun readAll(): QueueSet { ensureLoaded(); return _state.value }
+    /** Saves the active queue's state (the player calls this on every change and every ~5 s while playing). */
+    fun save(s: QueueSnapshot) { edit { QueueSets.saveActive(it, s) } }
+
+    /** Pack 6: a new queue (not active). Returns its id, or null when 10 queues exist already. */
+    fun create(name: String? = null, from: QueueSnapshot = QueueSnapshot()): String? {
+        val id = "q-" + System.currentTimeMillis().toString(36) + (0..999).random().toString(36)
+        var ok = false
+        edit { s -> QueueSets.create(s, id, name, from)?.also { ok = true } ?: s }
+        return id.takeIf { ok }
+    }
+    fun rename(id: String, name: String) { edit { QueueSets.rename(it, id, name) } }
+    /** Marks [id] active. The player switch (save current, load this one) is PlaybackService.switchQueue. */
+    fun setActive(id: String) { edit { QueueSets.setActive(it, id) } }
+    /** Refused for the last queue and the active one; returns whether it was deleted. */
+    fun delete(id: String): Boolean {
+        var ok = false
+        edit { s -> QueueSets.delete(s, id)?.also { ok = true } ?: s }
+        return ok
+    }
+    fun queue(id: String): NamedQueue? = _state.value.queues.firstOrNull { it.id == id }
+
     /** 1.0.5: write the pending snapshot now (service stopping / task removed), on IO. */
-    fun flush() { IoScope.launch { file.flush() } }
+    fun flush() { IoScope.launch { file.flush(); legacy.flush() } }
 }

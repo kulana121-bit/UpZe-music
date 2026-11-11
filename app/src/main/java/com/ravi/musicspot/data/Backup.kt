@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * 1.0.2: one JSON file with everything the user built up in UpZe: settings (theme, glass, sources, EQ, lyrics…),
- * liked songs, playlists, saved albums/artists, listening history, play counts, "Your artists" and the last queue.
+ * liked songs, playlists, saved albums/artists, listening history, play counts, "Your artists" and the saved queues (Pack 6: all of them).
  * Not included on purpose: account sign-ins (tokens stay on the phone), downloaded audio files and caches.
  */
 @Serializable
@@ -26,6 +26,8 @@ data class BackupFile(
     val playStats: PlayStatsData? = null,
     val seedArtists: List<SeedArtist>? = null,
     val queue: QueueSnapshot? = null,
+    /** Pack 6: every saved queue (queue above stays the active one, for older UpZe versions reading this file). */
+    val queues: QueueSet? = null,
 ) {
     companion object { const val APP = "UpZe"; const val FORMAT = 1 }
 }
@@ -39,7 +41,7 @@ object Backup {
     fun snapshot(nowMs: Long = System.currentTimeMillis()): BackupFile = BackupFile(
         app = BackupFile.APP, format = BackupFile.FORMAT, appVersion = BuildConfig.VERSION_NAME, createdMs = nowMs,
         settings = Graph.settings.value, library = Graph.library.data.value, playStats = Graph.playStats.data.value,
-        seedArtists = SeedArtists.state.value, queue = Graph.queueStore.read(),
+        seedArtists = SeedArtists.state.value, queue = Graph.queueStore.read(), queues = Graph.queueStore.readAll(),
     )
 
     fun encode(b: BackupFile): String = Http.json.encodeToString(BackupFile.serializer(), b)
@@ -60,7 +62,7 @@ object Backup {
         summary(b)
     }
 
-    /** Replaces the current library, settings, play counts and artists with the backup's (sign-ins are kept). The queue is
+    /** Replaces the current library, settings, play counts and artists with the backup's (sign-ins are kept). The queues are
      * stored in the file but not restored (it would interrupt what is playing). */
     suspend fun restore(ctx: Context, uri: Uri): Summary {
         val b = withContext(Dispatchers.IO) {

@@ -30,6 +30,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Delete
 import com.ravi.musicspot.ui.motion.scroll3d
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -116,9 +120,14 @@ fun QueuePane() {
     val rowPx = with(androidx.compose.ui.platform.LocalDensity.current) { 68.dp.toPx() }
     val haptics = rememberHaptics()
     val clock = LocalPaneEntrance.current // 1.0.2: cascade clock from the full-screen pane (1 elsewhere)
+    var queuesOpen by remember { mutableStateOf<Unit?>(null) } // Pack 6: the Queues sheet
+    QueuesDialog(queuesOpen) { queuesOpen = null }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp).cascade(clock, 2f), verticalAlignment = Alignment.CenterVertically) {
             Text("Up next · ${(st.queue.size - st.index - 1).coerceAtLeast(0)} songs", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            DjChip(Modifier.padding(end = 4.dp)) // Pack 6 Part 2
+            // Pack 6: several saved queues (the active one is the one playing).
+            TextButton(onClick = { queuesOpen = Unit }) { Text("Queues") }
             // 1.0.10: save the whole queue (every track, in order) through the existing Add to playlist dialog.
             IconButton(onClick = { Menus.addToPlaylist = st.queue.toList() }, enabled = st.queue.isNotEmpty()) {
                 Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, "Save queue as playlist")
@@ -600,8 +609,30 @@ fun sleepLabelPublic(): String {
  * glass capsule (words light up as they're sung when word-synced); each new line rolls up into place. Tap opens
  * the full lyrics pane. Hidden when the song has no synced lyrics.
  */
+/** Pack 6 Part 2: the capsule spot on the player also carries the "DJ" chip while a beat-matched transition is armed. */
 @Composable
 fun LyricsCapsule(onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        DjChip()
+        LyricsCapsuleBody(onOpen)
+    }
+}
+
+/** Pack 6 Part 2: small "DJ" chip, shown only while Playback.djArmed (a beat-matched transition is armed or running). */
+@Composable
+fun DjChip(modifier: Modifier = Modifier) {
+    val armed by com.ravi.musicspot.playback.Playback.djArmed.collectAsState()
+    androidx.compose.animation.AnimatedVisibility(armed, modifier, enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut()) {
+        Box(
+            Modifier.padding(vertical = 4.dp).clip(com.ravi.musicspot.ui.theme.Ms.pill)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+        ) { Text("DJ", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+    }
+}
+
+@Composable
+private fun LyricsCapsuleBody(onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val st by Graph.player.state.collectAsState()
     val t = st.current ?: return
     val settings by Graph.settings.state.collectAsState()
@@ -689,4 +720,66 @@ private fun Modifier.nowPlayingHighlight(): Modifier {
             drawRoundRect(edge.copy(alpha = pulse?.value ?: 0.7f), cornerRadius = r, style = stroke)
         }
     }.clip(shape)
+}
+
+
+/**
+ * Pack 6 Part 1: the Queues sheet. Lists every saved queue (the active one marked); tap a queue to switch to it
+ * (the current queue is saved first). New queue = an empty queue; Copy = the current queue as a new one. Neither
+ * switches by itself. Rename inline; Delete asks once and is not offered for the last queue.
+ */
+@Composable
+private fun QueuesDialog(item: Unit?, onDismiss: () -> Unit) = com.ravi.musicspot.ui.motion.MotionDialog(item, onDismiss = onDismiss) { _ ->
+    val set by Graph.player.queues.collectAsState()
+    val st by Graph.player.state.collectAsState()
+    var renaming by remember { mutableStateOf<String?>(null) }
+    var newName by remember { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf<String?>(null) }
+    val full = set.queues.size >= com.ravi.musicspot.data.QueueSets.MAX
+    com.ravi.musicspot.ui.motion.AlertDialogCard(
+        title = { Text("Queues") },
+        text = {
+            Column {
+                androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 340.dp)) {
+                    items(set.queues, key = { it.id }) { q ->
+                        val active = q.id == set.active
+                        val songs = if (active) st.queue.size else q.snapshot.tracks.size
+                        if (renaming == q.id) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.material3.OutlinedTextField(newName, { newName = it }, singleLine = true, label = { Text("Queue name") }, modifier = Modifier.weight(1f))
+                                TextButton(enabled = newName.isNotBlank(), onClick = { Graph.player.renameQueue(q.id, newName); renaming = null }) { Text("Save") }
+                            }
+                        } else if (confirmDelete == q.id) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Delete \"${q.name}\"?", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                TextButton(onClick = { confirmDelete = null }) { Text("Keep") }
+                                TextButton(onClick = { Graph.player.deleteQueue(q.id); confirmDelete = null }) { Text("Delete") }
+                            }
+                        } else {
+                            Row(Modifier.fillMaxWidth().clickable(enabled = !active) { Graph.player.switchQueue(q.id); onDismiss() }.padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.material3.RadioButton(selected = active, onClick = if (active) null else ({ Graph.player.switchQueue(q.id); onDismiss() }))
+                                Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                                    Text(q.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Text(if (active) "Playing · $songs songs" else "$songs songs", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                IconButton(onClick = { newName = q.name; renaming = q.id; confirmDelete = null }) {
+                                    Icon(androidx.compose.material.icons.Icons.Rounded.Edit, "Rename ${q.name}")
+                                }
+                                if (set.queues.size > 1) IconButton(onClick = { confirmDelete = q.id; renaming = null }) {
+                                    Icon(androidx.compose.material.icons.Icons.Rounded.Delete, "Delete ${q.name}")
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    TextButton(enabled = !full, onClick = { if (Graph.player.newQueue() != null) com.ravi.musicspot.ui.Pills.show("New empty queue added") }) { Text("New queue") }
+                    TextButton(enabled = !full && st.queue.isNotEmpty(), onClick = { if (Graph.player.copyCurrentQueue() != null) com.ravi.musicspot.ui.Pills.show("Copied the current queue") }) { Text("Copy current") }
+                }
+                if (full) Text("10 queues is the limit. Delete one to add another.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }

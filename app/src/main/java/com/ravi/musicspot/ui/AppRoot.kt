@@ -105,7 +105,7 @@ class PlayerSheetState {
  * Spotify stays metadata-only (library/playlist import); it never becomes a playable source.
  */
 @Composable
-fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
+fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit, openRoute: String? = null, onOpenRouteConsumed: () -> Unit = {}) {
     val settings by Graph.settings.state.collectAsState()
     val st by Graph.player.state.collectAsState()
     val ready by Graph.ready.collectAsState()
@@ -128,6 +128,17 @@ fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {
         val openConsumed by androidx.compose.runtime.rememberUpdatedState(onOpenPlayerConsumed)
         LaunchedEffect(openPlayer, hasMini) { if (openPlayer && hasMini) { expand(); openConsumed() } }
         LaunchedEffect(hasMini) { if (!hasMini) sheet.progress.snapTo(0f) }
+        // Pack 5 Part 2: a screen a widget asked for (MainActivity.EXTRA_OPEN_ROUTE).
+        val routeConsumed by androidx.compose.runtime.rememberUpdatedState(onOpenRouteConsumed)
+        LaunchedEffect(openRoute) {
+            when (openRoute) {
+                com.ravi.musicspot.MainActivity.ROUTE_WRAPPED -> nav.open(Tab.HOME, Route.Wrapped)
+                com.ravi.musicspot.MainActivity.ROUTE_SEARCH -> nav.select(Tab.SEARCH)
+                com.ravi.musicspot.MainActivity.ROUTE_DOWNLOADS -> nav.open(Tab.LIBRARY, Route.Downloads)
+                else -> return@LaunchedEffect
+            }
+            collapse(); routeConsumed()
+        }
 
         // Pages first; the player's own BackHandler (composed later) wins while it is open.
         // Predictive back (Android 14+ shows the gesture progress; older versions just get the back event): the page

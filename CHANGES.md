@@ -1,3 +1,167 @@
+# v1.05 — Pack 6 (Bade Khwab), Part 2 of 2: DJ Mode + music recognition (the last pack)
+
+versionName / versionCode unchanged (v1.05 / 35). Source only: no APK, no release. Built on the Pack 6 Part 1 source.
+
+## Job 1: DJ Mode (bundle item #13). Done, with the two-player overlap. Not yet run on a phone.
+- **BPM analysis** (`logic/DjMode.kt`, pure): decoded PCM is reduced on the fly to a 5 ms log-energy onset curve (about 6,000 floats per 30 s window; no PCM is held). Autocorrelation finds the beat period (70–180 BPM; slower songs read double time, faster ones half time). A comb search then refines the BPM to ~0.02 BPM and finds the first beat.
+- **No fake numbers.** A window with normalised autocorrelation below 0.15, silence, or under 8 s of audio returns null. A track whose head and tail tempos differ by more than 2% is also unknown (the tempo drifts). In the store, unknown is a real state ("U"). DJ Mode falls back to the plain crossfade for those tracks.
+- **"Downbeat" means the first detected beat.** There is no bar (1-2-3-4) detection.
+- **Analysis** (`data/BpmStore.kt`): BpmAnalyzer decodes two windows: the first 30 s, and the last 30 s (so the outgoing grid is measured where the transition happens). It uses MediaExtractor + MediaCodec through a small random-access adapter (Media3MediaDataSource). That adapter reads through the player's own resolving/cache data source, so headers, chunking and the media cache all work as in playback.
+- The analysis runs on one background-priority thread and only while DJ Mode is on: for the playing song and the next song. Memory is the codec's buffers plus a few 256 KB read blocks.
+- It costs some data: about 30 s at each end of a song. The head is mostly bytes the player prebuffers anyway.
+- **Store:** results are cached per track in `bpm.tsv` (append-only, max 5,000), and a cached track is never analysed again. A failed analysis (network/decoder) is NOT stored. It is tried again after the player service restarts.
+- **Tempo match:** `DjMode.tempoMatch` gives the incoming song's speed factor, with an octave-aware half/double-time match. The cap is ±6%. Beyond 6%, or with either BPM unknown, the factor is exactly 1.0 and the transition is the plain crossfade at normal speed.
+- The factor multiplies the user's speed (Pack 3 `PlaybackParameters`). Pitch handling is unchanged (`DjMode.parameters`): keep-pitch stays pitch 1.0, and otherwise pitch follows the speed, as the speed picker does.
+- After the handoff, the matched tempo eases back to the user's own speed over 8 s.
+- **Beat-aligned transition with a real overlap** (`PlaybackService.Dj`): the transition is armed 6 s before the crossfade window when both tempos are known and within the cap. A second ExoPlayer (the "deck") then prepares the next song paused and muted.
+- The deck has no audio focus, so it can't pause the main player. It has its own copy of the sound engine, so EQ and enhancer still apply.
+- `DjMode.plan` picks the deck start so the incoming first beat lands exactly on an outgoing beat inside the window. If the intro is longer than half the window, the deck starts a whole number of beats before the first beat.
+- The deck starts with a posted, timed play(). A phase lock keeps it on the grid: speed nudges of up to 3% while the deck is still quiet, then 1%.
+- Volumes during the overlap: the outgoing song uses the existing equal-power fall, and the deck uses the equal-power rise.
+- **Handoff:** 350 ms before the outgoing song ends, the main player (muted) seeks to the next song at the deck's position. It re-seeks once if it is more than 40 ms out of step, then takes over with a 200 ms equal-power swap. The deck is released immediately.
+- That song skips its own crossfade fade-in, because the deck already faded it in. Queue, notification, play counting and history follow the main player as usual.
+- **Every surprise falls back to the plain crossfade:** pause, seek, skip, a queue change, a deck not ready on time, beat drift over 400 ms, or DJ Mode turned off. The main player is never left muted (4 s handoff timeout).
+- DJ Mode never arms with repeat-one, an active sleep timer, live radio, the same song next, or songs too short for crossfade (the existing 3x rule).
+- Each decision goes to the playback log ("DJ: armed 124.0 → 120.0 BPM…", "DJ: plain crossfade (beyond ±6%)").
+- **Stability:** I could not run the two-player overlap on a device here, so I can't prove it is stable on the 3 GB Android 10 phone. It is built so every failure path falls back to today's crossfade, never to silence or a stuck mute.
+- If it proves unstable on the phone, the documented fallback (beat-aligned, tempo-matched starts with the existing crossfade, no deck) is a small change inside `Dj.tryArm`. It is NOT shipped as a fake.
+- **Harmonic reorder is OUT of this part:** no key detection, and the queue is never reordered. Nobody should claim it.
+- **Settings › Playback › Transitions › "DJ Mode"** (default OFF). Turning it on sets gapless OFF and makes sure there is a crossfade window: crossfade becomes 8 s if it was under 6 s, otherwise your length is kept.
+- Turning it off only turns DJ Mode off. Gapless and crossfade stay as they are.
+- If you turn gapless back on while DJ Mode is on, DJ Mode waits, and the row says "Waiting: needs crossfade on (gapless off)".
+- With DJ Mode off, or with one track, nothing new runs: no analysis and no deck. The ticker's only change is that it multiplies by a gain that stays 1.0.
+- **Indicator:** a small "DJ" chip shows while a beat-matched transition is armed or running. It appears above the lyrics capsule on the player and in the Up next header (both in Panes.kt). It is hidden otherwise.
+
+## Job 2: Music recognition, "What's playing" (bundle item #15). Done, keyless.
+- **Route verified first.** Shazam's public recognition endpoint (the one the open-source SongRec uses) works with NO account and NO API key.
+- It was verified end to end from the Kotlin code here: our own `ShazamSignature` from 10 s of 16 kHz audio identified Billie Jean (Michael Jackson), Stayin' Alive (Bee Gees) and Blinding Lights (The Weeknd; it returned the Remix entry, which uses the same recording).
+- So there is no key slot in Settings: it isn't needed, no key is shipped, and none is asked for.
+- Caveat: the endpoint is unofficial. If Shazam changes it, the sheet says "Couldn't reach the recognition service" with Try again. It never pretends to listen.
+- **Fingerprint** (`recognition/ShazamSignature.kt`, pure): a port of SongRec's fingerprinting (GPL-3.0, credited in the file), covering the FFT, peak spreading, peak picking and the binary format with CRC-32.
+- Only the peaks are sent: no audio, no location. The request ids are random each time.
+- **Entry:** a "What's playing" button next to the voice-search mic in Search (the only Search entry point; nothing elsewhere).
+- Permission: the existing first-use flow. RECORD_AUDIO is asked only when the button is tapped. The manifest is unchanged (RECORD_AUDIO was already there).
+- **Flow:** a sheet opens in a clear listening state with a level bar and Cancel. The mic records 16 kHz mono into memory only and tries to identify at 4, 8 and 12 s.
+- The mic stops the moment a song is found, at 12 s, or on Cancel / closing the sheet (the job is cancelled). The buffer is zeroed, and nothing is written anywhere.
+- The match is resolved by searching every enabled source in your priority order (`MusicSource.search(query, 5)`, in parallel, 6 s each), the AiMix pattern. `TrackMatcher` scoring picks the best (threshold 0.72; ISRC wins when both sides have one; ties within 0.02 go to the higher-priority source).
+- The sheet shows the best match (art, title, artist, which source) with **Play**, which starts it in the player.
+- Recognised but no playable copy: it says so, with "Search for it" and "Listen again". No match: "No match. Couldn't recognise this song." with Try again. Network failure: "Couldn't reach the recognition service" with Try again.
+- **Privacy line on the sheet:** "The microphone is on only while this sheet is open. Nothing is recorded or saved."
+
+## Files (one line each)
+- logic/DjMode.kt (new): onset envelope, BPM + beat grid, head/tail combine, tempoMatch (±6%), parameters (pitch kept), beat-aligned plan.
+- data/BpmStore.kt (new): BpmStore (per-track cache, unknown kept), BpmAnalyzer (MediaExtractor/MediaCodec two-window decode), Media3MediaDataSource.
+- data/Settings.kt: `djMode` (default false). Nothing else.
+- playback/PlaybackService.kt: Playback.djArmed / djStretch; the `Dj` controller (analysis, arming, deck, phase lock, handoff, fallbacks, tempo ease-back); the shared resolving/media-source factories; djGain in applyVolume; one ticker hook; release in onDestroy.
+- playback/PlayerConnection.kt: applySpeed includes the DJ stretch; it doesn't re-apply while the service is easing the tempo.
+- recognition/ShazamSignature.kt (new): fingerprint generator and encoder.
+- recognition/SongRecognizer.kt (new): ShazamClient (request + answer parsing), RecognitionMatch (search + best-match pick), MicRecognizer (memory-only capture, 4/8/12 s attempts).
+- ui/settings/SettingsPages.kt: the DJ Mode switch in Transitions.
+- ui/screens/Search.kt: the "What's playing" button, its permission launcher, and WhatsPlayingSheet.
+- ui/player/Panes.kt: DjChip, shown above the lyrics capsule (LyricsCapsule now wraps LyricsCapsuleBody) and in the Up next header.
+- test/DjModeTest.kt (new, 12 tests): click tracks at 128 / 93.5 / 120 / 174 / 100.3 / 71 BPM within ±1 BPM; 126 BPM at 48 kHz plus the first-beat time; a 200 BPM pulse reads half time; noise, random clicks, silence and a too-short clip all give unknown (null); head/tail combine and the drift rule; ±6% cap with fallback at exactly 1.0; pitch kept; plan lands on the grid; long-intro whole-beat skip; store round trip incl. unknown.
+- test/RecognitionTest.kt (new, 8 tests): answer parsing (match / no-match / junk); best-match pick across sources, priority tie-break, ISRC, no-match path; signature binary layout + CRC; silence gives no peaks. The `liveIdentify` test is skipped unless MUSICSPOT_SHAZAM_PCM / MUSICSPOT_SHAZAM_EXPECT are set.
+- Not touched: AndroidManifest.xml (nothing missing), versionName/versionCode, every other file.
+
+## Build and tests
+- Toolchain: JDK 21, AGP 9.3.0 / Gradle 9.5.0, SDK platform 37.0, build-tools 36.0.0. This sandbox is aarch64, so aapt2 was supplied via `-Pandroid.aapt2FromMavenOverride` (command line only; no project file changed).
+- Before (Part 1 source, same toolchain): compileDebugKotlin BUILD SUCCESSFUL. testDebugUnitTest: 290 run, 0 failures, 0 errors, 9 skipped (53 classes). This matches Part 1's own numbers.
+- After: compileDebugKotlin BUILD SUCCESSFUL, no warnings in changed code. The one warning in SettingsPages.kt (LocalClipboardManager, line ~413) is old code.
+- testDebugUnitTest after: 310 run, 0 failures, 0 errors, 10 skipped (55 classes).
+- 20 new tests. The 10th skip is the gated live recognition test. No old test was edited, and nothing that passed before fails now.
+- Live recognition check (run here with real song previews, not in CI): 3 of 3 identified correctly.
+- Not run on a phone. Check on the 3 GB Android 10 device:
+  - A DJ transition between two steady-tempo songs within 6% (watch for the DJ chip and the "DJ:" lines in the playback log).
+  - A pair more than 6% apart (it should be a plain crossfade).
+  - Pause or skip during the overlap.
+  - "What's playing" next to a speaker.
+
+# v1.05 — Pack 6 (Bade Khwab), Part 1 of 2: Android Auto browsing + multiple queues
+
+versionName / versionCode unchanged (v1.05 / 35). Source only: no APK, no release. Built on the Pack 5 Part 2 source.
+
+## Job 1: Android Auto browse tree. Done.
+- The README's "MediaSession browsing" claim is now true. PlaybackService is a MediaLibraryService with a MediaLibrarySession and a full browse tree. README.md is not edited.
+- Tree (your own library only, no live sources): root → Liked songs · Playlists (one node per playlist → its tracks) · History (newest first) · On this device (downloaded + fully cached, each song once).
+- Empty sections and empty playlists are hidden, so every browsable node has playable songs under it.
+- Media ids: `upze:root|liked|playlists|history|device`, `upze:pl/<enc id>`, `upze:play|<parent>|<enc track id>`. The app's own queue items keep the bare track id, so the two can't collide.
+- Playing a browse song (onSetMediaItems) queues its parent's tracks and starts at the tapped song.
+- A stale id (the song was removed from that list) fails the request cleanly. It never crashes and never plays the wrong thing.
+- onAddMediaItems resolves a browse song to its real track. The app's own items take exactly the same path as before.
+- Search (onSearch / onGetSearchResult): title, artist or album, max 50 results, each song once. A result plays inside the section it was found in.
+- Children and search results are paged.
+- Callbacks wait for Graph to be ready, because a head unit can start the service cold.
+- The "recent" root (params.isRecent) answers NOT_SUPPORTED. Playback resumption stays the restored queue.
+- Transport, the ticker, SafePositionPlayer/fader and the session activity are untouched. Only the session type and the callback object changed.
+
+## Job 2: Multiple persistent queues. Done.
+- Up to 10 named queues in `queues.json`. Each keeps its own tracks, index, position, shuffle and repeat. One queue is active.
+- `read()/load()/save()` still mean the active queue, so the restore, the 5 s position save and Backup work unchanged.
+- Migration: the first read turns an existing `queue.json` into the active "My queue", unchanged (tested).
+- `queue.json` keeps being written with the active queue, so a downgrade still restores the queue you were on.
+- queues.json writes are held until it has been read. Edits made before that are replayed, so the other queues are never overwritten (tested).
+- Switching (PlaybackService.switchQueue, on the player thread): saves the current queue's full state first, including an empty queue so a cleared queue stays cleared. Then it marks the new queue active and loads its tracks, index, position, shuffle and repeat. Play/pause stays as it was.
+- My choice for **New queue**: it starts empty and is NOT switched to. **Copy current** saves the current queue (songs, position, shuffle, repeat) as "Copy of <name>", also not switched to. This is separate from "Save queue as playlist", which is unchanged.
+- Rename is inline. Delete asks once. You can't delete the last queue. Deleting the active queue switches to the next queue (or the previous one) first.
+- UI: a "Queues" button in the Up next header opens the Queues dialog. The active queue is marked "Playing". No changes were needed in Overlays.kt, because the queue actions live in Panes.kt.
+- Known limitation: switching to an empty queue stops playback and the player sheet closes. The next song you play starts filling that queue. To get back to another queue, play anything, then open Up next › Queues.
+- Single-queue playback, tidy (1.0.7 smart queue) and autoplay are unchanged. With one queue, the app behaves as before.
+- Backup now includes every queue (`queues`). `queue` stays the active one for older readers. Restore still doesn't touch queues (same as before).
+
+## Files (one line each)
+- playback/AutoBrowse.kt (new): pure tree, id encode/decode, resolve, search, paging.
+- playback/PlaybackService.kt: MediaLibraryService + MediaLibrarySession callback (browse/search/onSetMediaItems); switchQueue/deleteQueue; saveQueue(force).
+- playback/PlayerConnection.kt: queues flow, switchQueue, newQueue, copyCurrentQueue, renameQueue, deleteQueue.
+- data/Library.kt: NamedQueue, QueueSet, QueueSets (pure rules), and QueueStore generalised (migration, 10-queue cap, legacy mirror).
+- data/Backup.kt: optional `queues` field (all queues). FORMAT stays 1, and older files still decode.
+- ui/player/Panes.kt: "Queues" button + QueuesDialog (switch, new, copy, rename, delete).
+- AndroidManifest.xml: MediaLibraryService + MediaBrowserService actions (MediaSessionService kept); com.google.android.gms.car.application meta-data.
+- res/xml/automotive_app_desc.xml (new): `<uses name="media"/>` only.
+- test/AutoBrowseTest.kt (new, 8 tests); test/QueueStoreMultiTest.kt (new, 7 tests).
+
+## Build and tests
+- compileDebugKotlin: BUILD SUCCESSFUL.
+- testDebugUnitTest before: 275 run, 0 failures, 0 errors, 9 skipped (51 classes).
+- testDebugUnitTest after: 290 run, 0 failures, 0 errors, 9 skipped (53 classes).
+- 15 new tests. No old test was edited, and nothing that passed before fails now.
+- Not run on a phone or a head unit. Check Android Auto with the Desktop Head Unit (DHU) or in a car.
+
+# Pack 5 (Nayi Jeet) Part 2: Widgets (2026-11-11), still v1.05 (versionCode 35, unchanged)
+
+Corner bug, the real cause: `makeBackground()` painted one fixed 640x300 card (256x120 bitmap), and `w_bg` showed it with `centerCrop`, so the pre-rounded corners were cropped away on every real widget size (square on Android 10). Fix: one shared helper (`WidgetCard`) renders the card at each widget's ACTUAL size (from AppWidgetManager options: min/max width/height in dp to px, portrait = minW x maxH, landscape = maxW x minH). The bitmap keeps the widget's aspect (scaled so its longest side is at most 400 px for the binder limit), the radius is scaled with it (22 dp, clamped to half the short side), and every widget shows it with `fitXY`. `onAppWidgetOptionsChanged` re-renders on resize. No widget's outer layer is a centre-cropped or square image any more. The album-art thumbnail keeps its rounded-bitmap treatment.
+
+## Files
+- widget/WidgetCard.kt (new): the shared rounded-card renderer (per-pixel anti-aliased rounded rect, art-coloured diagonal gradient, 1 dp glass edge), widget-size reading, a small cache.
+- widget/NowPlayingWidget.kt: the card is rendered per widget id at its real size via WidgetCard. Stores Palette colours instead of one fixed bitmap. Adds onAppWidgetOptionsChanged. One render path for both now-playing layouts. Every push refreshes the stats widget. Art thumbnail is 192 px (64 dp). Adds the thin `NowPlayingCompactWidget` receiver at the end of the file.
+- widget/StatsWidget.kt (new): "This week" widget. `StatsCard.from` is a direct read of `Wrapped.summarize(WEEK)` (plays, current streak, top song) with no maths of its own. Empty state: "Play something — your week in music will appear here". Tap opens Your stats.
+- widget/ShortcutsWidget.kt (new): 4x1 Search / Downloads / Shuffle / Resume.
+- res/layout/widget_now_playing.xml: w_bg uses fitXY. Padding is 12/8 dp (was 14), art 64 dp (was 84), buttons 34/40/34 dp (was 40/48/40). Removed the small "UPZE" label to fit the lower height. Removed the useless clipToOutline.
+- res/layout/widget_now_playing_compact.xml (new): 4x1 row with 40 dp art, title/artist, play/pause, next.
+- res/layout/widget_stats.xml (new): stats card layout.
+- res/layout/widget_shortcuts.xml (new): shortcuts layout.
+- res/xml/widget_now_playing_info.xml: min 250x110dp changed to 250x92dp, minResize 220x100 changed to 220x84. Target 4x2 kept.
+- res/xml/widget_now_playing_compact_info.xml (new): 250x40dp, target 4x1, horizontal resize.
+- res/xml/widget_stats_info.xml (new): 180x92dp, target 3x2, resizable up to 320x180dp (4x2), updatePeriodMillis 1800000.
+- res/xml/widget_shortcuts_info.xml (new): 250x40dp, target 4x1.
+- res/drawable/widget_bg.xml: radius 28 changed to 22 dp to match WidgetCard (only seen before the first render and in the picker).
+- res/drawable/widget_ic_search.xml, widget_ic_download.xml, widget_ic_shuffle.xml, widget_ic_top.xml (new): white vector icons.
+- AndroidManifest.xml: three receivers (NowPlayingCompactWidget, StatsWidget, ShortcutsWidget). Nothing else changed.
+- MainActivity.kt: no route extra existed, so added the smallest handling. `EXTRA_OPEN_ROUTE` ("open_route") with ROUTE_WRAPPED / SEARCH / DOWNLOADS / SHUFFLE / RESUME, read in onCreate (fresh start only) and onNewIntent, then removed from the intent. Shuffle plays Liked songs shuffled (else History) through `Graph.player.play(shuffle = true)`. Resume waits for PlaybackService's restored queue (up to 8 s), then plays. Both open the player. With nothing to play, a pill says so.
+- ui/AppRoot.kt: two optional params (`openRoute`, `onOpenRouteConsumed`) and one LaunchedEffect. Wrapped goes to Home + Route.Wrapped, Search to the Search tab, Downloads to Library + Route.Downloads.
+- test/WidgetCornerTest.kt (new, Robolectric sdk 29, 5 tests): wide 320x92dp, tall 160x220dp and 4x1 250x40dp cards have transparent corners, an opaque centre and filled edges, and keep the widget's aspect. Also tests the raw pixel buffer and reading the size from the options Bundle.
+- test/StatsWidgetTest.kt (new, 2 tests): the widget's numbers equal Wrapped.summarize on fixture data (plus the fixture's literal values), and a new user gets the empty line.
+
+## Build and tests (same toolchain as Part 1)
+- Before (Part 1 output): compileDebugKotlin BUILD SUCCESSFUL. testDebugUnitTest: 268 tests, 0 failures, 0 errors, 9 skipped (49 classes).
+- After: compileDebugKotlin BUILD SUCCESSFUL, no warnings in changed files. testDebugUnitTest: 275 tests, 0 failures, 0 errors, 9 skipped (51 classes). +7 new. No existing test edited. Nothing that passed before fails now.
+
+## Notes
+- Shortcuts: all four are wired, none dropped. Search and Downloads open those screens. Shuffle and Resume actually start playback (from a cold tap they open the app, wait for the stores and player, then play). Resume needs a saved queue. With none, it says "No previous session to resume yet".
+- The stats card uses the default UpZe colours (it has no artwork). The now-playing cards use the artwork's colours.
+- The corner tests use a per-pixel renderer, so they run under Robolectric's default (legacy) graphics and need no native graphics runtime.
+- Widgets were compiled and unit-tested, NOT run on a device or launcher. Please check them on the Android 10 phone.
+- Card bitmaps are rendered on the caller thread (~400x150 px, cached per size and colours).
+
 # Pack 5 (Nayi Jeet), Part 1 of 2: personalised Home + Wrapped anytime (versionName/versionCode unchanged: v1.05 / 35)
 
 Everything is built on data the app already keeps on the device (PlayStats per-track plays/repeats, the per-day log,

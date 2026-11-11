@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.rounded.CallMade
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material3.FilterChip
@@ -76,6 +77,9 @@ import com.ravi.musicspot.ui.components.TrackRow
 import com.ravi.musicspot.ui.glass.glass
 import com.ravi.musicspot.ui.openCollection
 import com.ravi.musicspot.ui.theme.Ms
+import com.ravi.musicspot.ui.glass.glassSheet
+import androidx.compose.foundation.layout.navigationBarsPadding
+import kotlinx.coroutines.launch
 import com.ravi.musicspot.yt.SearchFilter
 import kotlinx.coroutines.delay
 
@@ -131,6 +135,12 @@ fun SearchScreen() {
     }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) listen() else Pills.show("Microphone permission is needed for voice search") }
 
+    // Pack 6 Part 2: "What's playing" (song recognition). Same first-use permission flow as voice search: asked only
+    // when the entry is tapped. The mic runs only while the sheet is open (closing it cancels the job, which stops it).
+    var whatsPlaying by remember { mutableStateOf<Unit?>(null) }
+    val recPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) whatsPlaying = Unit else Pills.show("Microphone permission is needed to recognise a song") }
+    WhatsPlayingSheet(whatsPlaying, onDismiss = { whatsPlaying = null }, onSearch = { q -> whatsPlaying = null; submit(q) })
+
     // v2.0.16: keyed on query too, so submitting the text already typed cancels an in-flight suggestion fetch
     // (it used to pop the list back up over the results); cancellation is rethrown instead of writing an empty list.
     LaunchedEffect(input, query) {
@@ -179,6 +189,11 @@ fun SearchScreen() {
                     if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) listen()
                     else micPermission.launch(Manifest.permission.RECORD_AUDIO)
                 }) { Icon(Icons.Rounded.Mic, "Voice search", tint = if (listening) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
+                // Pack 6 Part 2: What's playing (identify a song playing around you).
+                IconButton(onClick = {
+                    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) whatsPlaying = Unit
+                    else recPermission.launch(Manifest.permission.RECORD_AUDIO)
+                }) { Icon(Icons.Rounded.GraphicEq, "What's playing", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         }
         // v2.0.6: suggestions drop in / fade out with the shared motion specs (instant with Reduce motion).
@@ -238,4 +253,101 @@ fun SearchScreen() {
         }
     }
     }
+}
+
+
+/**
+ * Pack 6 Part 2: the "What's playing" sheet. Listens (up to 12 s, mic only while open), identifies the song, finds it
+ * in the user's own sources and offers Play. No match / no playable copy / no connection each say so, with a retry.
+ */
+@Composable
+private fun WhatsPlayingSheet(item: Unit?, onDismiss: () -> Unit, onSearch: (String) -> Unit) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var phase by remember { mutableStateOf<RecPhase>(RecPhase.Listening) }
+    var level by remember { mutableStateOf(0f) }
+    var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun start() {
+        job?.cancel()
+        phase = RecPhase.Listening; level = 0f
+        job = scope.launch {
+            val out = com.ravi.musicspot.recognition.MicRecognizer.listen { l -> level = l }
+            phase = when (out) {
+                is com.ravi.musicspot.recognition.MicRecognizer.Outcome.Found -> {
+                    phase = RecPhase.Finding(out.song)
+                    val t = try { com.ravi.musicspot.recognition.RecognitionMatch.resolve(out.song) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+                    RecPhase.Found(out.song, t)
+                }
+                com.ravi.musicspot.recognition.MicRecognizer.Outcome.NoMatch -> RecPhase.NoMatch
+                is com.ravi.musicspot.recognition.MicRecognizer.Outcome.Failed -> RecPhase.Failed(out.message)
+            }
+        }
+    }
+    fun close() { job?.cancel(); job = null; onDismiss() }
+    LaunchedEffect(item) { if (item != null) start() else { job?.cancel(); job = null } }
+    DisposableEffect(Unit) { onDispose { job?.cancel() } }
+    com.ravi.musicspot.ui.motion.MotionSheet(item, onDismiss = { close() }) {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+            androidx.compose.foundation.layout.Column(
+                Modifier.fillMaxWidth().glassSheet(Ms.r28).navigationBarsPadding().padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("What's playing", style = MaterialTheme.typography.titleLarge)
+                when (val p = phase) {
+                    RecPhase.Listening -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Mic, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Listening… hold your phone near the music", style = MaterialTheme.typography.bodyLarge)
+                        }
+                        androidx.compose.material3.LinearProgressIndicator(progress = { (level * 3f).coerceIn(0.05f, 1f) }, modifier = Modifier.fillMaxWidth())
+                        androidx.compose.material3.TextButton(onClick = { close() }) { Text("Cancel") }
+                    }
+                    is RecPhase.Finding -> {
+                        Text("${p.song.title} · ${p.song.artist}", style = MaterialTheme.typography.titleMedium)
+                        Text("Finding it in your sources…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    is RecPhase.Found -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.ravi.musicspot.ui.components.Artwork(p.track?.artUrl ?: p.song.artUrl, Modifier.size(64.dp))
+                            Spacer(Modifier.width(12.dp))
+                            androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
+                                Text(p.song.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
+                                Text(p.song.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                p.track?.let { Text("on ${it.source.label}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                        }
+                        val t = p.track
+                        if (t != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            androidx.compose.material3.Button(onClick = { Graph.player.play(listOf(t)); close() }) { Text("Play") }
+                            androidx.compose.material3.TextButton(onClick = { start() }) { Text("Listen again") }
+                        } else {
+                            Text("Recognised, but no playable copy turned up in your sources.", style = MaterialTheme.typography.bodyMedium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                androidx.compose.material3.Button(onClick = { onSearch(com.ravi.musicspot.recognition.RecognitionMatch.query(p.song)) }) { Text("Search for it") }
+                                androidx.compose.material3.TextButton(onClick = { start() }) { Text("Listen again") }
+                            }
+                        }
+                    }
+                    RecPhase.NoMatch -> {
+                        Text("No match. Couldn't recognise this song.", style = MaterialTheme.typography.bodyLarge)
+                        androidx.compose.material3.Button(onClick = { start() }) { Text("Try again") }
+                    }
+                    is RecPhase.Failed -> {
+                        Text(p.message, style = MaterialTheme.typography.bodyLarge)
+                        androidx.compose.material3.Button(onClick = { start() }) { Text("Try again") }
+                    }
+                }
+                Text("The microphone is on only while this sheet is open. Nothing is recorded or saved.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+private sealed interface RecPhase {
+    data object Listening : RecPhase
+    data class Finding(val song: com.ravi.musicspot.recognition.RecognizedSong) : RecPhase
+    data class Found(val song: com.ravi.musicspot.recognition.RecognizedSong, val track: Track?) : RecPhase
+    data object NoMatch : RecPhase
+    data class Failed(val message: String) : RecPhase
 }

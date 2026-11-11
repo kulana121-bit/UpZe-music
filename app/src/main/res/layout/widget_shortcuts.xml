@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pack 5 Part 2: 4×1 shortcuts (Search, Downloads, Shuffle, Resume); every button is a real action. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/k_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_bg">
+    <ImageView android:id="@+id/k_bg" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="fitXY" android:importantForAccessibility="no" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="2dp" android:paddingBottom="2dp">
+        <LinearLayout android:id="@+id/k_search" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="center_horizontal" android:contentDescription="Search">
+            <ImageView android:layout_width="32dp" android:layout_height="32dp" android:padding="7dp" android:background="@drawable/widget_btn"
+                android:src="@drawable/widget_ic_search" android:importantForAccessibility="no" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Search"
+                android:textSize="10sp" android:textColor="#E6FFFFFF" android:maxLines="1" android:includeFontPadding="false" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/k_downloads" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="center_horizontal" android:contentDescription="Downloads">
+            <ImageView android:layout_width="32dp" android:layout_height="32dp" android:padding="7dp" android:background="@drawable/widget_btn"
+                android:src="@drawable/widget_ic_download" android:importantForAccessibility="no" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Downloads"
+                android:textSize="10sp" android:textColor="#E6FFFFFF" android:maxLines="1" android:includeFontPadding="false" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/k_shuffle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="center_horizontal" android:contentDescription="Shuffle your liked songs">
+            <ImageView android:layout_width="32dp" android:layout_height="32dp" android:padding="7dp" android:background="@drawable/widget_btn"
+                android:src="@drawable/widget_ic_shuffle" android:importantForAccessibility="no" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Shuffle"
+                android:textSize="10sp" android:textColor="#E6FFFFFF" android:maxLines="1" android:includeFontPadding="false" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/k_resume" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="center_horizontal" android:contentDescription="Resume last session">
+            <ImageView android:layout_width="32dp" android:layout_height="32dp" android:padding="8dp" android:background="@drawable/widget_play_bg"
+                android:src="@drawable/ic_w_play" android:importantForAccessibility="no" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Resume"
+                android:textSize="10sp" android:textColor="#E6FFFFFF" android:maxLines="1" android:includeFontPadding="false" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

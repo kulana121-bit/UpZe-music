@@ -1,6 +1,7 @@
 package com.ravi.musicspot
 
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import androidx.lifecycle.lifecycleScope
 import android.content.Intent
 import android.graphics.Color
@@ -22,6 +23,8 @@ import com.ravi.musicspot.ui.motion.trackTaps // 1.0.1
 
 class MainActivity : ComponentActivity() {
     private var openPlayer by mutableStateOf(false)
+    /** Pack 5 Part 2: a screen a widget asked for (EXTRA_OPEN_ROUTE), opened by AppRoot once, then cleared. */
+    private var openRoute by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Always-dark UI: light system-bar icons over transparent bars, content drawn edge to edge.
@@ -39,6 +42,7 @@ class MainActivity : ComponentActivity() {
         Graph.init(application)
         openPlayer = intent?.getBooleanExtra(EXTRA_OPEN_PLAYER, false) == true
         if (savedInstanceState == null) playPinned(intent) // 1.0.2: a pinned song shortcut
+        if (savedInstanceState == null) openFromWidget(intent) // Pack 5 Part 2: stats / shortcuts widgets
         // 1.0.2 Privacy › Block screenshots: FLAG_SECURE follows the setting live.
         lifecycleScope.launch {
             Graph.awaitReady()
@@ -74,7 +78,8 @@ class MainActivity : ComponentActivity() {
                         com.ravi.musicspot.ui.setup.SetupFlow()
                     }
                 } else {
-                    AppRoot(openPlayer = openPlayer, onOpenPlayerConsumed = { openPlayer = false })
+                    AppRoot(openPlayer = openPlayer, onOpenPlayerConsumed = { openPlayer = false },
+                        openRoute = openRoute, onOpenRouteConsumed = { openRoute = null })
                 }
             }
         }
@@ -85,6 +90,34 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false)) openPlayer = true
         playPinned(intent)
+        openFromWidget(intent)
+    }
+
+    /**
+     * Pack 5 Part 2: widget taps. Screens (Your stats, Search, Downloads) go to AppRoot via [openRoute]; Shuffle and
+     * Resume start playback here through the normal player entry points, then show the player.
+     */
+    private fun openFromWidget(intent: Intent?) {
+        val r = intent?.getStringExtra(EXTRA_OPEN_ROUTE) ?: return
+        intent.removeExtra(EXTRA_OPEN_ROUTE) // a rotation or re-delivery doesn't repeat it
+        when (r) {
+            ROUTE_SHUFFLE -> lifecycleScope.launch {
+                Graph.awaitReady()
+                val lib = Graph.library.data.value
+                val tracks = lib.liked.ifEmpty { lib.history.map { it.track } }.distinctBy { it.id }
+                if (tracks.isEmpty()) com.ravi.musicspot.ui.Pills.show("Nothing to shuffle yet. Like or play a few songs first.")
+                else { Graph.player.play(tracks, tracks.indices.random(), shuffle = true); openPlayer = true }
+            }
+            ROUTE_RESUME -> lifecycleScope.launch {
+                Graph.awaitReady()
+                runCatching { Graph.player.connect() }
+                // PlaybackService restores the saved queue (song + position) when it starts; wait for it, then play.
+                val st = kotlinx.coroutines.withTimeoutOrNull(8_000) { Graph.player.state.first { it.current != null } }
+                if (st == null) com.ravi.musicspot.ui.Pills.show("No previous session to resume yet")
+                else { if (!st.playing) Graph.player.toggle(); openPlayer = true }
+            }
+            ROUTE_WRAPPED, ROUTE_SEARCH, ROUTE_DOWNLOADS -> openRoute = r
+        }
     }
 
     /** 1.0.2: a home-screen song shortcut (player ⋮ › Pin to home screen) plays its song. */
@@ -130,5 +163,14 @@ class MainActivity : ComponentActivity() {
         setTaskDescription(td)
     }
 
-    companion object { const val EXTRA_OPEN_PLAYER = "open_player" }
+    companion object {
+        const val EXTRA_OPEN_PLAYER = "open_player"
+        /** Pack 5 Part 2: widget → screen or action (one of the ROUTE_ values). */
+        const val EXTRA_OPEN_ROUTE = "open_route"
+        const val ROUTE_WRAPPED = "wrapped"
+        const val ROUTE_SEARCH = "search"
+        const val ROUTE_DOWNLOADS = "downloads"
+        const val ROUTE_SHUFFLE = "shuffle"
+        const val ROUTE_RESUME = "resume"
+    }
 }
