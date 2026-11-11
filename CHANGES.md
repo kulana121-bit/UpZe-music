@@ -1,3 +1,37 @@
+# UpZe v1.04 (internal 1.0.9, versionCode 34): fix pack, 4 fixes only
+
+Verified here: `./gradlew assembleDebug` BUILD SUCCESSFUL (0 errors, debug APK built; no release/signed build).
+`./gradlew testDebugUnitTest`: 224 tests, 214 passed, 9 skipped (LiveSmokeTest / LiveV205Test need MUSICSPOT_LIVE=1),
+1 failed: `PlaybackThreadingTest.playViaPlayerConnection` ("Timed out waiting for autoplay radio appended", 15 s
+wall-clock wait under Robolectric). It fails the same way on the untouched v1.03 source on this machine, so it is not
+caused by this pack. 13 new tests, all pass. Not run on a device.
+
+## 1. Monochrome never claims unverified FLAC (source/MonochromeSource.kt)
+- The old probe returned `getOrDefault(true)`: a failed probe was labelled FLAC / 1411 kbps.
+- Now `probeStreamFormat()` reads the first 12 bytes and returns Flac / NotFlac(codec) / Failed. FLAC / 1411 only on a
+  confirmed `fLaC` header. A failed probe (exception, HTTP error, empty body) is labelled "Quality not verified" with
+  no bitrate; non-FLAC bytes get the delivered format (AAC, MP3, Ogg) or "Quality not verified". A FLAC Content-Type
+  alone is not proof. Neither label ever counts as lossless (`QualityEstimate.isLosslessStream`).
+- Test: `MonochromeProbeTest` (8 tests, incl. probe failure by exception, unreachable host, HTTP 500, empty body).
+
+## 2. Updater verifies SHA-256 before installing (update/UpdateLogic.kt, update/Updater.kt)
+- `UpdateLogic.sha256Hex`, `verifyDownload` (MATCH / MISMATCH / NO_DIGEST), `verificationFailedMessage`.
+- `Updater.update`: after the download (or a reused earlier download), the file's SHA-256 is compared with the
+  release asset digest. Anything but a match: file deleted, sheet shows "Update failed verification: …", installer
+  not launched. A release without a published digest is treated as unverifiable and is not installed.
+- Test: `UpdateVerifyTest` (5 tests: match, mismatch with equal size, no digest, digest parsed from release JSON).
+
+## 3. Cached songs: Clear all (ui/screens/LibraryExtras.kt, data/CachedSongs.kt)
+- Header button (sweep icon, "Clear all") on Library › Cached songs. Confirmation shows the songs and the size that
+  will be freed; confirming empties `Graph.cached` and removes those songs' media-cache resources, then the empty
+  state shows. New `CachedSongs.clearAllPreview()` / `clearAll()`. Per-song remove and Settings › Storage unchanged.
+
+## 4. Bookkeeping
+- `app/build.gradle.kts`: versionName "v1.04", versionCode 34.
+- `CHANGELOG.md`: v1.02 (1.0.7), v1.03 (1.0.8), v1.04 entries; public numbers as headlines, internal as a mapping.
+- `README.md`: release badge v1.04.
+- `ui/AppRoot.kt`, `lyrics/KuGou.kt`: stale comments corrected to match the code.
+
 # UpZe v1.03 (1.0.8), source only, no APK built
 
 Not compiled or run here (no Android toolchain in this pass); please run `./gradlew assembleDebug` and the unit tests once. New test: `Lyrics108Test` (lyrics clock + letter timing).

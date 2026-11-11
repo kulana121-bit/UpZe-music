@@ -4,23 +4,192 @@ All notable changes to UpZe are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and UpZe follows [Semantic Versioning](https://semver.org/).
 Android `versionCode` always increases, whatever the version name.
 
-## [v1.03] - 2026-11-10
-### Added
-- **3D Sound (Spatial 3D)** — an HRTF-style spatial stage in the sound engine for headphones: shuffler widening, crossfeed with head-shadow, pinna cues and a synthetic room, with an Intensity slider (Settings › Sound › 3D Sound). Virtual speakers for stereo; honestly labelled, never "Atmos". Off by default.
-- **Motion Lyrics** — a kinetic full-screen lyric stage over the artwork: words pop in when sung, the stage kicks on the beat (beat/tone metered from the engine's own audio), and Spotify Canvas songs keep their video clear underneath.
-- **Letter-by-letter lyrics sync** — full-screen lyrics run on a frame-accurate clock anchored to the player; lines switch just before their timestamp so they land with the voice.
+## Version numbering
+Public releases are tagged `v1.0x` on GitHub and that is the version name the app shows. Older entries below use the
+internal 1.0.x numbers. Mapping: 1.0.7 = **v1.02** (versionCode 32), 1.0.8 = **v1.03** (versionCode 33),
+1.0.9 = **v1.04** (versionCode 34).
 
-### Improved
-- Faster opening: settings, library, play stats, downloads and accounts load in parallel.
-- Snappier animations app-wide and lighter liquid-glass blur; ambient loops are paced on every device.
-- Home smoothness: fixed a stagger bug that re-faded shelves and rows while scrolling; downloads no longer redraw the whole Home per progress tick.
-
+## [v1.04] - 2026-11-11
+_Internal 1.0.9 · versionCode 34. A fix pack: no new features, nothing removed._
 ### Fixed
-- Spotify Canvas videos freezing on a stale frame after leaving and returning to the player (surface re-attach, re-seek, and a stall watchdog).
-- Stability fixes throughout.
+- Tidal / Monochrome never claims unverified FLAC. A stream is labelled FLAC / 1411 kbps only when its first bytes
+  are a confirmed `fLaC` header. If the probe fails (network or HTTP error, empty answer), the stream shows
+  "Quality not verified" and never counts as lossless; a non-FLAC stream shows the format actually delivered
+  (AAC, MP3, Ogg). Before, a failed probe was treated as FLAC.
+- The in-app updater checks the downloaded APK's SHA-256 against the digest GitHub publishes for the release asset.
+  On a mismatch (or a release with no digest) the file is deleted, the sheet says the update failed verification,
+  and the installer is not opened. Before, only the byte size was checked.
+### Added
+- Library › Cached songs: a **Clear all** button. It asks first, showing how much space will be freed, then empties
+  the cached-songs list and removes those songs from the media cache. Per-song "Remove from cache" and
+  Settings › Storage are unchanged.
+### Housekeeping
+- This changelog brought up to date (v1.02, v1.03); README release badge now v1.04; two stale code comments
+  corrected (account login pages are real; KuGou uses word-timed KRC first, then LRC).
 
+## [v1.03]
+_Internal 1.0.8 · versionCode 33._
+### Faster
+- Opening: settings, library, play stats, downloads, accounts and artist seeds load in parallel; the network warm-up
+  runs off the main thread after the stores are ready; the update check waits 4 s after start.
+- Animations are quicker and lighter (shorter durations, stiffer springs, ambient loops paced to ~30 FPS, ~20 FPS on
+  lite devices); nothing was removed. Lighter blurs for liquid glass, frosted glass, Haze and the sheet focus blur.
+- Home: fixed the stagger bug that faded rows in again on every scroll; Home no longer recomposes on download
+  progress ticks; lighter spotlight and card shadows.
+- Queue: softer 3D effect below the playing song.
+### Lyrics
+- Full-screen lyrics run on a frame-accurate clock; lines switch 150 ms early so the glide finishes as the voice
+  starts; one font weight for every line so lines no longer jump mid-glide.
+- Word-synced lines light up letter by letter.
+- **Motion Lyrics** mode (player ⋯ menu, or Settings › Lyrics): kinetic, beat-reactive lyrics over the blurred
+  artwork, or over a clear Spotify Canvas video.
+### Added
+- **3D Sound / Spatial 3D** (Settings › Sound): headphone virtual-speaker rendering for stereo, with an intensity
+  slider. Off by default, bypassed in Pure hi-res. Labelled honestly: never called Atmos or surround.
+### Fixed
+- Spotify Canvas freezing after Motion Lyrics was on and another screen was opened.
 
-## [Unreleased]
+## [v1.02] - 2026-11-08
+_Internal 1.0.7 · versionCode 32._
+### Sound and quality
+- Quality defaults to **Lossless when available** on Wi-Fi and mobile data (existing installs move once); falls back
+  to Max when no lossless copy exists.
+- A gold **LOSSLESS** (or **HI-RES**) label next to the song name, shown only while the stream really is lossless.
+- Automatic lossless upgrade: while a lossy stream plays, enabled lossless sources are searched in the background
+  and a real lossless copy of the same recording takes over at the same position.
+- New default source order: lossless sources first (Qobuz, Tidal/Monochrome, NetEase, Local, Subsonic, Jellyfin),
+  YouTube Music last. Existing installs move once; a later reorder is kept.
+- Sound enhancer (Light) and transient restore on by default (one-time migration; skipped on lowest-end devices).
+  The EQ chip opens a Sound sheet over the player.
+### Lyrics
+- Word-by-word providers are asked first, and the chain prefers word-by-word over line-by-line over plain.
+  Providers are asked in parallel (4 at a time).
+### Look and feel
+- Dynamic colours follow the cover's dominant colours, fading between songs.
+- Queue keeps played songs above the playing one; full-screen pages are Lyrics, Queue, Related.
+- Home shortcut bubbles removed (still in Library and Search).
+### Fixed
+- The update sheet kept offering the build that was already installed. The app now compares the installed APK with
+  the release asset by SHA-256 (or exact size without a digest) and refuses to "update" to a versionCode that is not
+  higher.
+
+### Between 1.0.6 and v1.02
+CHANGES.md also records the "v1" passes made after 1.0.6 (published as versionName "v1" / tag v1.01). It does not say
+exactly which release each first shipped in, so they are listed here once rather than guessed:
+- Low-end glass (Water film on lite devices) and recomposition passes; new red headphones app icon.
+- Related songs pane restored; Spotify sign-in crash fixes (duplicate ids, sync errors, WebView reattach).
+- Lossless source expansion: Tidal / Monochrome, Qobuz proxy, NetEase, FLAC radio stations.
+- Word-by-word lyrics expansion: Musixmatch RichSync, AMLL TTML, QQ Music QRC, KuGou KRC, NetEase YRC, JioSaavn
+  lyrics, Lyrics.ovh.
+- History holds each song once; offline lyrics for downloads; crossfade, play/pause ramps and zero-wait next track;
+  Listen Together heartbeat and reconnect.
+
+## [1.0.6] - 2026-11-07
+### One design each, two docks
+- Now Playing is always the Aura player; Home is always Spotlight (big artwork). The Classic, Deck (cassette) and Poster players and the Classic, Aura and Bento Home dashboards were removed.
+- Docks: Classic and Orb (floating cover) remain; Island and Split were removed.
+- Settings › Appearance keeps only the Dock design choice. First-run setup (Customize) drops the Player and Home steps: 5 steps instead of 7.
+- Saved settings and backups from older versions load unchanged apart from the design: an old player or Home choice becomes Aura / Spotlight, the Island dock becomes Classic and the Split dock becomes Orb. No other setting is reset.
+- About 4,000 lines of UI code that only the removed designs used are gone (smaller app, faster to build).
+
+## [1.0.5] - 2026-11-07
+### Faster on 2 GB phones (same look, same features)
+- Players (Classic, Aura, Deck, Poster): position, loop phases, reel rotation, pulses and heart bursts are now read only while drawing, so covers and decks no longer recompose every frame. The play/pause shape morph lives in its own small composable.
+- Ambient loops run at about 30 FPS on lite devices, with the phase computed from elapsed time so speed and easing stay the same. Touch and scroll stay at full rate.
+- Draw code reuses Paths, strokes and gradients instead of allocating them every frame.
+- Glass: on Android 12+ full-screen content is no longer recorded twice per frame. Palette colours decode at 96 px in RGB_565 and are cached per cover. Song-tint fades no longer recompose the whole app.
+- Lists: every lazy item has a unique key and a contentType (fixes possible "key already used" crashes on duplicate songs and pending downloads). Row data is remembered, and swipe rows don't recompose on every drag frame.
+- Audio engine: no allocation in the real-time loop. EQ chains are built off the audio thread and swapped atomically. The resampler table at odd rates (e.g. 44101 Hz) is capped at about 1.6 MB instead of 37-75 MB.
+### Fixed
+- Library and play stats could be overwritten with near-empty data if you played or liked a song while they were still loading at startup.
+- JSON saves run on IO, one at a time per file, atomically, and are flushed when the app goes to the background.
+- Expired YouTube URLs after a long pause are refreshed and playback continues at the same position. The client is no longer benched for an expiry, which used to cause an audible source switch.
+- Rapid skips cancel in-flight lyrics lookups, so old lyrics never land on the new song.
+- Listen together: leaving a room closes its stream and cancels its coroutines.
+- Bluetooth auto-play no longer leaks its media controller. Widget controls run on the player thread.
+- Widget artwork is capped at 256 px, cutting each update from about 1 MB to about 380 KB (prevents TransactionTooLargeException).
+- After an EQ crossfade into bypass, the rest of that buffer no longer gets the old EQ.
+
+## [1.0.4] - 2026-11-07
+### Fixed
+- Crash when opening or closing the full player (corner radius went negative during the spring animation). All animated corner radii are now clamped at 0.
+- Home: the blurred cover behind the hero spilled below it as a hard-edged strip. Background art is now clipped to its box (Home, Aura home, players).
+### Added
+- Playlist tools on every song list (online playlists and albums, Liked, History, Downloads, Cached, On this device): search inside, sort, Play next, Add to queue, Share; online albums/playlists can also be pinned to the top of Library.
+### Faster
+- Startup profile now also covers playback, data, settings and core code, so Android pre-compiles more of the app at install.
+
+## [1.0.3] - 2026-11-07
+
+### Seamless source switch
+- A stream that fails mid-song (expired or refused URL, CDN error, Wi-Fi to mobile data) is now retried in the background while the buffer keeps playing: a fresh URL is fetched and playback continues at the same byte, with no pause.
+- If the fresh stream is a different source or quality, the switch happens at the same position with a 0.6 s fade-in instead of a hard stop.
+### Fixes from the final review
+- AI Integration: clearing the Base URL or Model field no longer snaps back to the preset; picking a preset fills both.
+- Resolver bookkeeping after a refused URL now runs on the main thread.
+
+### Added
+- **Backup & restore** (Settings › Backup & restore): one JSON file with settings, liked songs, playlists, saved
+  albums/artists, history, play counts and your artists, saved anywhere through the system file picker. Restore
+  asks first and keeps sign-ins. Downloads and sign-in tokens are not included.
+- **Smart queue, always on:** duplicate songs (same id, or the same recording on another source) are removed as soon
+  as they are added; songs already played leave the queue, so the playing song is always on top (not while shuffle
+  or Repeat all is on).
+- **Infinite play keeps ~20 songs lined up,** topping up whenever 10 or fewer are left (follows on through a second
+  radio when one radio runs short).
+- **Lyrics waiting dots:** during an intro or a beat/solo break in synced lyrics (word or line), three dots hop and
+  light up in turn (OpenTune style) and the last line dims; they fold away when singing resumes.
+- **Player ⋮:** "Cast / play on another device" (system output picker; Cast settings on Android 10) and "Pin to home
+  screen" (a launcher shortcut with the cover that plays the song).
+- **Playlist page:** search inside the playlist; Sort by (Custom, Recently added, Title, Artist, Album, Duration),
+  remembered per playlist; ⋮ with Play next, Add to queue, Pin to top of Library, Add to home screen, Share (song
+  list as text, plus the YouTube Music link for synced playlists), Rename, Delete. Own playlists: song ⋮ or
+  long-press → "Remove from playlist".
+- **Settings › AI Integration:** any OpenAI-compatible provider (OpenAI, Gemini, Groq, OpenRouter, DeepSeek, Mistral,
+  Anthropic, or a custom https URL) with your own key (Android-keystore encrypted, never backed up). "Make my mix" sends
+  only artist/song names from your stats, likes and history, finds the suggestions on YouTube Music/JioSaavn and saves
+  an "AI Mix" playlist. Optional mood chips, 15/25/40 songs, Test button.
+- **Settings › Listen stats:** 1 week, 3 weeks, 1 month, 1 year, all time. Minutes count-up hero, top artist, animated
+  per-day/month/year bar chart, ranked Songs/Artists/Albums with animated bars (tap to play). New per-day play log,
+  seeded once from history. Reduce motion respected.
+- **Settings › Playback:** SponsorBlock (YouTube songs; hash-prefix lookup; choose categories), Play when Bluetooth
+  connects (audio devices only), Pause at zero volume (resumes when turned up), Skip songs that fail (max 5 in a row).
+- **Settings › Privacy (new):** Incognito (no history, stats, cached-song index or recent searches) and Block
+  screenshots (FLAG_SECURE, live). Clear listen stats / recent searches.
+- **Library › Cached songs:** every song played to the end stays in the media cache and is listed here; it plays with
+  no internet (the cache is tried before any network call, so it also saves data). Oldest make room when the cache
+  limit is reached; ⋮ › Remove from cache; Download-all turns them into permanent downloads.
+- **Library › Listen together:** host a room (6-character code) or join one; any number of listeners hear the host's
+  song, play/pause and seeks in sync (each phone streams on its own). Listeners can "Send to the room" from a song's ⋮.
+  Uses the free ntfy.sh relay (configurable `togetherServer`); only song info and position travel.
+- **Library › Live radio:** stations near you (approximate location, asked on tap; ~400 km, then your state), top
+  stations in your country, and search, from the Radio Browser directory. Live streams are never cached or downloaded,
+  skip lyrics and Infinite play.
+- **History:** ⋮ or long-press on a song → "Remove from history" (just that entry).
+
+### Changed
+- The song menu hides "Play next" for the song that is already playing (the player's ⋮).
+
+- **Interactive swipe-up to Queue / Lyrics.** The page follows the finger as a rounded card while the player sinks
+  back (scales, rises, dims); release past a third of the screen, or flick, and it springs open, otherwise it falls
+  back. A haptic tick marks the open point. Pulling the pane down shrinks it into a card that follows the finger.
+- **Pane entrance cascade (Material motion).** Header, tabs, then queue rows (from the first visible one) and lyric
+  lines (rippling out from the playing line) rise and fade in on the emphasized curve. Swiping between Queue and
+  Lyrics makes the outgoing page recede. All draw-phase only; instant under Reduce motion.
+- **Player motion.** A new song pops the cover in on a spring; tapping play bursts a ring out of the button; the
+  playing lyric line has a soft glow in the song colour (not on lite devices).
+- **Settings → Appearance → Blur intensity** (Off – 100%) for every blurred glass style. Off samples nothing.
+
+### Changed / performance
+- **Dock and mini-player glass no longer freeze.** Haze now samples the content behind the glass at ¼ (Android 8–11,
+  lite devices) or ⅓ size and blurs that, so the blur keeps up with scrolling in real time; noise pass removed.
+  The Liquid lens drops chromatic aberration, and lite devices skip its inner-shadow pass.
+- Full-screen artwork washes (Classic and Aura players, Aura and Spotlight home) use a 32 px decode stretched with
+  bilinear filtering instead of `Modifier.blur`: same soft look on every Android version, far cheaper, and glass on
+  top no longer re-blurs a blurred layer.
+- The player and Aura background drift is read in the draw phase only (no recomposition per frame) and is off on
+  lite devices, where it made every glass control re-blur each frame.
+- Synced lyrics recompose only when the active line changes; only the word-synced line reads the position each tick.
 
 ## 1.0.1 — 2026-11-05
 

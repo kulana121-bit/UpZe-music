@@ -28,8 +28,9 @@ import java.util.concurrent.TimeUnit
  * 1.0.0 in-app updater. Asks GitHub for the latest release of [UpdateLogic.REPO] (unauthenticated, User-Agent "UpZe",
  * ETag-cached so an unchanged answer is a 304 that does not count against the rate limit), at most once every 12 h
  * on app start and on demand from Settings › About. A newer release with an .apk asset opens [UpdateSheet]. The APK is
- * downloaded with OkHttp into cacheDir/updates (progress in the sheet), its size checked, and handed to the system
- * package installer through a FileProvider content:// URI. Android itself refuses an APK not signed with the same key.
+ * downloaded with OkHttp into cacheDir/updates (progress in the sheet), its size checked, its SHA-256 compared with
+ * the release asset's published digest (v1.04: a mismatch or a missing digest deletes the file and never installs),
+ * and handed to the system package installer through a FileProvider content:// URI. Android itself refuses an APK not signed with the same key.
  * Every failure is silent apart from a line in the app log (Settings › About › Playback log).
  */
 object Updater {
@@ -157,6 +158,16 @@ object Updater {
                     if (!part.renameTo(target)) throw java.io.IOException("could not save the download")
                 }
                 log("downloaded ${target.name} (${target.length()} bytes)")
+                // v1.04: the size check alone proves nothing about the bytes. Compare the file's SHA-256 with the digest
+                // GitHub publishes for the release asset; anything but a match is deleted and never reaches the installer.
+                val verification = UpdateLogic.verifyDownload(target, rel.apkSha256)
+                if (verification != UpdateLogic.Verification.MATCH) {
+                    log("v${rel.version} failed SHA-256 verification ($verification); deleted ${target.name}")
+                    target.delete()
+                    _download.value = Download.Failed(UpdateLogic.verificationFailedMessage(verification))
+                    return@launch
+                }
+                log("SHA-256 verified for ${target.name}")
                 // 1.0.7: never hand the installer a build that is not newer than this one (it would "update" to itself
                 // and the sheet would come back on the next check). Remember the tag so it is not offered again.
                 val code = archiveVersionCode(app, target)

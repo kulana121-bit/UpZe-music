@@ -108,6 +108,29 @@ class CachedSongs(private val ctx: Context, dir: File) {
         _complete.value = _complete.value.filterNot { it.track.id == trackId }
     }
 
+    /** v1.04: what "Clear all" on Cached songs frees: the song count and cached bytes of every indexed song. IO thread. */
+    fun clearAllPreview(): Pair<Int, Long> {
+        awaitIndex()
+        val all = index.values.toList()
+        return all.size to bytes(all)
+    }
+
+    /**
+     * v1.04: "Clear all" on Cached songs. Empties the index and removes every indexed song's media-cache resource
+     * (the same removal per-song "Remove from cache" does, for all of them). Call on an IO thread. Other cache entries
+     * (songs never indexed) and downloads are untouched; Settings › Storage keeps its own full media-cache clear.
+     * Returns the number of songs removed.
+     */
+    fun clearAll(): Int {
+        awaitIndex()
+        val all = synchronized(this) { val e = index.values.toList(); index = emptyMap(); if (loaded.count > 0L) cleared = true; e }
+        file.save { index }
+        _complete.value = emptyList()
+        val c = runCatching { PlaybackService.cache(ctx) }.getOrNull() ?: return all.size
+        all.forEach { e -> runCatching { c.removeResource(e.cacheKey) } }
+        return all.size
+    }
+
     fun clearIndex() { synchronized(this) { index = emptyMap(); if (loaded.count > 0L) cleared = true }; file.save { index }; _complete.value = emptyList() }
 
     companion object { const val MAX = 2000 }

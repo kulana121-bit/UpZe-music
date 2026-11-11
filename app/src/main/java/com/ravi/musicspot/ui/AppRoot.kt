@@ -100,7 +100,9 @@ class PlayerSheetState {
 /**
  * The app shell: theme, the glass layer the floating chrome samples, per-tab navigation with page motion,
  * the mini player that expands into Now Playing (swipe/drag up to open, swipe down or back to collapse),
- * back handling and edge-to-edge insets. Google/Spotify login pages are placeholders until step 3.
+ * back handling and edge-to-edge insets. The Google (YouTube Music) and Spotify login pages (ui/account/SignIn.kt,
+ * SpotifyConnectActivity) are real and fully wired: Settings › Accounts routes to them and they save encrypted sessions.
+ * Spotify stays metadata-only (library/playlist import); it never becomes a playable source.
  */
 @Composable
 fun AppRoot(openPlayer: Boolean, onOpenPlayerConsumed: () -> Unit) {

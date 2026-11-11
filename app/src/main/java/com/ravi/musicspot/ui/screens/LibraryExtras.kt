@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Radio
@@ -42,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -94,6 +96,10 @@ fun CachedSongsScreen() {
     val entries by Graph.cached.complete.collectAsState()
     var used by remember { mutableStateOf(0L) }
     var loading by remember { mutableStateOf(entries.isEmpty()) }
+    // v1.04: "Clear all": non-null while the confirmation is open, holding (songs, bytes) that clearing frees.
+    var clearAllPreview by remember { mutableStateOf<Pair<Int, Long>?>(null) }
+    var clearing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { val e = Graph.cached.refresh(); used = Graph.cached.bytes(e) }
         loading = false
@@ -103,8 +109,32 @@ fun CachedSongsScreen() {
         null, entries.map { it.track }, loading = loading,
         emptyIcon = Icons.Rounded.CloudDone, emptyTitle = "No cached songs yet",
         emptyBody = "Every song you listen to all the way through is kept here and plays without internet, until the cache fills up and the oldest make room. Download a song to keep it for good.",
+        headerActions = {
+            IconButton(onClick = {
+                scope.launch { clearAllPreview = withContext(Dispatchers.IO) { Graph.cached.clearAllPreview() } }
+            }, enabled = !loading && !clearing && entries.isNotEmpty()) { Icon(Icons.Rounded.DeleteSweep, "Clear all") }
+        },
         rowTrailing = { _, t -> if (Graph.downloads.isDownloaded(t.id)) Badge("SAVED") else Badge("OFFLINE") },
         rowMenu = { _, t -> Menus.cachedId = t.id; Menus.track = t })
+    com.ravi.musicspot.ui.motion.MotionAlertDialog(item = clearAllPreview, onDismissRequest = { clearAllPreview = null },
+        title = { Text("Clear all cached songs?") },
+        text = { (count, bytes) ->
+            Text("This frees ${formatBytes(bytes)} by removing $count ${if (count == 1) "song" else "songs"} from the cache. " +
+                "They will stream from the internet again. Downloads are not affected.")
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                clearAllPreview = null
+                clearing = true
+                scope.launch {
+                    val n = withContext(Dispatchers.IO) { Graph.cached.clearAll() }
+                    used = 0L
+                    clearing = false
+                    Pills.show(if (n == 1) "Cleared 1 cached song" else "Cleared $n cached songs")
+                }
+            }) { Text("Clear all") }
+        },
+        dismissButton = { TextButton(onClick = { clearAllPreview = null }) { Text("Cancel") } })
 }
 
 // ---- Listen together -------------------------------------------------------------------------------------------

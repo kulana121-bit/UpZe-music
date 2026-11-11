@@ -83,6 +83,35 @@ object UpdateLogic {
     /** 1.0.7: a downloaded APK is only an update when its versionCode is higher than the installed one. */
     fun isUpgrade(downloadedCode: Long?, installedCode: Long): Boolean = downloadedCode == null || downloadedCode > installedCode
 
+    /** v1.04: lower-case hex SHA-256 of [file], streamed in 64 KB blocks. */
+    fun sha256Hex(file: java.io.File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /** v1.04: outcome of checking a downloaded APK against the release's published SHA-256. */
+    enum class Verification { MATCH, MISMATCH, NO_DIGEST }
+
+    /**
+     * v1.04: compares the SHA-256 of [file] with [expectedSha256] (the release asset's digest). Only [Verification.MATCH]
+     * may be installed; a release without a digest cannot be verified and is [Verification.NO_DIGEST].
+     */
+    fun verifyDownload(file: java.io.File, expectedSha256: String?): Verification {
+        val expected = expectedSha256?.trim()?.lowercase()?.takeIf { it.length == 64 } ?: return Verification.NO_DIGEST
+        return if (sha256Hex(file) == expected) Verification.MATCH else Verification.MISMATCH
+    }
+
+    /** v1.04: the message shown when a downloaded update is not installed because it failed verification. */
+    fun verificationFailedMessage(v: Verification): String = when (v) {
+        Verification.MISMATCH -> "Update failed verification: the download didn't match the published SHA-256 checksum, so it was deleted and not installed."
+        Verification.NO_DIGEST -> "Update failed verification: this release has no published SHA-256 checksum, so it was deleted and not installed."
+        Verification.MATCH -> ""
+    }
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /**

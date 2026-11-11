@@ -25,10 +25,11 @@ import okhttp3.Request
  * chosen one as LRC. It's strong on Chinese, Japanese and Korean songs and
  * covers a lot of Western pop too.
  *
- * Only the plain LRC format is used. KuGou's word-by-word format (KRC) is
- * encrypted, and reading it would mean using a key taken from their apps.
- * The service only answers over plain HTTP; lyrics are public text, so
- * nothing private travels.
+ * The word-by-word format (KRC) is tried first: its content is decrypted
+ * (KrcDecryptor) and parsed word-timed (KrcParser) into synced lyrics. When
+ * there is no KRC, or it fails to decrypt or parse, the plain line-synced
+ * LRC is downloaded instead. Requests go over HTTPS (Http refuses plain
+ * http://); lyrics are public text, so nothing private travels.
  */
 object KuGou {
     private const val BASE = "https://lyrics.kugou.com"
