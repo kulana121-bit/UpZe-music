@@ -1,3 +1,24 @@
+# UpZe v1.05 (internal 1.0.10, versionCode 35): 2 small jobs
+
+## 2A. Autoplay seed-guard fix + test update
+- `playback/PlaybackService.kt`: `maybeAutoplay` skipped a seed whose id matched the previous seed (`autoplayFor`), even
+  after the queue was replaced (e.g. replaying the same song, or a restored queue then `play(seed)`), so Infinite play
+  never appended radio. `onMediaItemTransition` now resets `autoplayFor` on `MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED`
+  (fires only when the current item itself is replaced; appends and tidy removals do not trigger it).
+- `PlaybackThreadingTest.playViaPlayerConnection` (no timeout change, nothing skipped): the stale 1.0.2 assertion
+  "played song removed" now asserts the 1.0.7 rule (played song kept at index 0, exactly once). The test tone went
+  from 2 s to 60 s because every wait advances Robolectric's virtual clock and a 2 s tone auto-advanced past the seed.
+- `app/build.gradle.kts`: versionName "v1.05", versionCode 35.
+
+## 2B. Lint: `./gradlew lintDebug` runs and passes (16 errors -> 0; no baseline)
+- `data/CachedSongs.kt`: UnsafeOptInUsageError x11, class-level `@OptIn(UnstableApi)` (SimpleCache/ContentMetadata).
+- `playback/BluetoothAutoPlay.kt`: MissingPermission, explicit BLUETOOTH_CONNECT check on API 31+ before reading
+  the device class; without it the class is unknown (null), the same result as the old swallowed SecurityException.
+- `MainActivity.kt`: StateFlowValueCalledInComposition x2, initial `collectAsState` snapshot wrapped in `remember`.
+- `ui/player/FullPane.kt`: UnusedBoxWithConstraintsScope, `BoxWithConstraints` -> `Box` (scope unused).
+- `ui/settings/SoundPage.kt`: SuspiciousIndentation, `soundItems` body re-indented (whitespace only).
+- 97 warnings + 5 hints remain as warnings (no lint baseline file was added; none are errors).
+
 # UpZe v1.04 (internal 1.0.9, versionCode 34): fix pack, 4 fixes only
 
 Verified here: `./gradlew assembleDebug` BUILD SUCCESSFUL (0 errors, debug APK built; no release/signed build).

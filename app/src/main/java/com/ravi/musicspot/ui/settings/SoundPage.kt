@@ -110,119 +110,119 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.soundItems(st: Sound
     val s = st.s; val status = st.status; val rates = st.rates; val autoEqOpen = st.autoEqOpen; val setAutoEq = st.setAutoEq
     val eq = s.eq
     val pure = s.pureHiRes || s.bitPerfectUsb
-        item(key = "soundpage-1", contentType = "static") {
-            Group {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text(when {
-                        pure -> "Bypassed: pure hi-res / bit-perfect output is on (Settings › Playback)"
-                        !eq.enabled -> status.badge?.let { "EQ off · $it" } ?: "Engine idle — EQ off"
-                        eq.bypassB -> "B: bypass (bit-exact pass-through)"
-                        else -> listOfNotNull(if (status.eqActive) "EQ active" else "EQ flat", status.badge,
-                            status.detectedCutoffHz?.let { "source cutoff ~${it / 1000} kHz" },
-                            if (status.limiterDb < -0.1) "limiter %.1f dB".format(status.limiterDb) else null).joinToString(" · ")
-                    }, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    if (status.disabledForCpu) Text("Enhance paused: this device couldn't keep up in real time.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    ResponseCurve(eq, Modifier.fillMaxWidth().height(120.dp).padding(top = 10.dp))
+    item(key = "soundpage-1", contentType = "static") {
+        Group {
+            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                Text(when {
+                    pure -> "Bypassed: pure hi-res / bit-perfect output is on (Settings › Playback)"
+                    !eq.enabled -> status.badge?.let { "EQ off · $it" } ?: "Engine idle — EQ off"
+                    eq.bypassB -> "B: bypass (bit-exact pass-through)"
+                    else -> listOfNotNull(if (status.eqActive) "EQ active" else "EQ flat", status.badge,
+                        status.detectedCutoffHz?.let { "source cutoff ~${it / 1000} kHz" },
+                        if (status.limiterDb < -0.1) "limiter %.1f dB".format(status.limiterDb) else null).joinToString(" · ")
+                }, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                if (status.disabledForCpu) Text("Enhance paused: this device couldn't keep up in real time.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                ResponseCurve(eq, Modifier.fillMaxWidth().height(120.dp).padding(top = 10.dp))
+            }
+            SwitchRow("Equalizer", "Software EQ inside the player (float, no clicks on changes)", eq.enabled, enabled = !pure) { v -> updEq { it.copy(enabled = v) } }
+            RowDivider()
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("A/B compare", style = MaterialTheme.typography.titleSmall)
+                    Text("B passes audio through bit-exact", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                SwitchRow("Equalizer", "Software EQ inside the player (float, no clicks on changes)", eq.enabled, enabled = !pure) { v -> updEq { it.copy(enabled = v) } }
-                RowDivider()
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("A/B compare", style = MaterialTheme.typography.titleSmall)
-                        Text("B passes audio through bit-exact", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SingleChoiceSegmentedButtonRow {
+                    SegmentedButton(selected = !eq.bypassB, onClick = { updEq { it.copy(bypassB = false) } }, shape = SegmentedButtonDefaults.itemShape(0, 2), enabled = eq.enabled && !pure) { Text("A") }
+                    SegmentedButton(selected = eq.bypassB, onClick = { updEq { it.copy(bypassB = true) } }, shape = SegmentedButtonDefaults.itemShape(1, 2), enabled = eq.enabled && !pure) { Text("B") }
+                }
+            }
+        }
+    }
+
+    item(key = "soundpage-2", contentType = "static") {
+        Group("Presets") {
+            ChoiceRow(null, EqPresets.graphic.keys.toList(), eq.preset, { it }) { name ->
+                updEq { it.copy(graphic = EqPresets.graphic.getValue(name), preset = name, parametricOn = if (it.preset.startsWith("AutoEq")) false else it.parametricOn) }
+            }
+            RowDivider()
+            NavRowLike(Icons.Rounded.Headphones, "AutoEq headphone correction",
+                if (eq.preset.startsWith("AutoEq")) eq.preset.removePrefix("AutoEq · ") else "Search 8,000+ measured headphones") { setAutoEq(!autoEqOpen) }
+        }
+    }
+    if (autoEqOpen) item { AutoEqSearch { setAutoEq(false) } }
+
+    item(key = "soundpage-3", contentType = "static") {
+        Group("10-band graphic") {
+            EqConfig.GRAPHIC_FREQS.forEachIndexed { i, f ->
+                SliderRow("${hz(f)} Hz", eq.graphic.getOrElse(i) { 0.0 }.toFloat(), -12f..12f, db(eq.graphic.getOrElse(i) { 0.0 }), enabled = eq.enabled && !pure) { v ->
+                    val r = (v * 2).roundToInt() / 2.0
+                    updEq { e -> e.copy(graphic = e.graphic.toMutableList().also { l -> while (l.size < 10) l.add(0.0); l[i] = r }, preset = "Custom") }
+                }
+            }
+            TextButton(onClick = { updEq { it.copy(graphic = List(10) { 0.0 }, preset = "Flat") } }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Reset to flat") }
+        }
+    }
+
+    item(key = "soundpage-4", contentType = "static") {
+        Group("Parametric") {
+            SwitchRow("Parametric bands", "Peak, shelf and pass filters with frequency, gain and Q (added on top of the graphic EQ)", eq.parametricOn, enabled = eq.enabled && !pure) { v -> updEq { it.copy(parametricOn = v) } }
+            if (eq.parametricOn) {
+                eq.parametric.forEachIndexed { i, b ->
+                    RowDivider()
+                    ParamBandEditor(i, b, onChange = { nb -> updEq { e -> e.copy(parametric = e.parametric.toMutableList().also { it[i] = nb }, preset = if (e.preset.startsWith("AutoEq")) e.preset else "Custom") } },
+                        onRemove = { updEq { e -> e.copy(parametric = e.parametric.filterIndexed { j, _ -> j != i }) } })
+                }
+                Row(Modifier.padding(horizontal = 8.dp)) {
+                    TextButton(onClick = { updEq { e -> e.copy(parametric = e.parametric + ParamBandSetting(FilterType.PEAK, 1000.0, 0.0, 1.0)) } }, enabled = eq.parametric.size < 16) {
+                        Icon(Icons.Rounded.Add, null); Text("Add band")
                     }
-                    SingleChoiceSegmentedButtonRow {
-                        SegmentedButton(selected = !eq.bypassB, onClick = { updEq { it.copy(bypassB = false) } }, shape = SegmentedButtonDefaults.itemShape(0, 2), enabled = eq.enabled && !pure) { Text("A") }
-                        SegmentedButton(selected = eq.bypassB, onClick = { updEq { it.copy(bypassB = true) } }, shape = SegmentedButtonDefaults.itemShape(1, 2), enabled = eq.enabled && !pure) { Text("B") }
-                    }
+                    TextButton(onClick = { updEq { e -> e.copy(parametric = EqSetting.DEFAULT_PARAMS) } }) { Text("Reset bands") }
                 }
             }
         }
+    }
 
-        item(key = "soundpage-2", contentType = "static") {
-            Group("Presets") {
-                ChoiceRow(null, EqPresets.graphic.keys.toList(), eq.preset, { it }) { name ->
-                    updEq { it.copy(graphic = EqPresets.graphic.getValue(name), preset = name, parametricOn = if (it.preset.startsWith("AutoEq")) false else it.parametricOn) }
-                }
-                RowDivider()
-                NavRowLike(Icons.Rounded.Headphones, "AutoEq headphone correction",
-                    if (eq.preset.startsWith("AutoEq")) eq.preset.removePrefix("AutoEq · ") else "Search 8,000+ measured headphones") { setAutoEq(!autoEqOpen) }
-            }
+    item(key = "soundpage-5", contentType = "static") {
+        Group("Gain & space") {
+            SliderRow("Preamp", eq.preampDb.toFloat(), -12f..6f, db(eq.preampDb), enabled = eq.enabled && !pure) { v -> updEq { it.copy(preampDb = (v * 2).roundToInt() / 2.0) } }
+            SwitchRow("Automatic headroom", "Lowers the preamp by the curve's highest boost so nothing clips", eq.autoHeadroom, enabled = eq.enabled && !pure) { v -> updEq { it.copy(autoHeadroom = v) } }
+            RowDivider()
+            SliderRow("Bass boost", eq.bassBoostDb.toFloat(), 0f..12f, if (eq.bassBoostDb == 0.0) "Off" else db(eq.bassBoostDb), enabled = eq.enabled && !pure,
+                subtitle = "Low shelf at 90 Hz") { v -> updEq { it.copy(bassBoostDb = (v * 2).roundToInt() / 2.0) } }
+            SliderRow("Stereo widener", eq.widen.toFloat(), 0f..1f, if (eq.widen == 0.0) "Off" else "${(eq.widen * 100).roundToInt()}%", enabled = eq.enabled && !pure,
+                subtitle = "Mild mid/side widening") { v -> updEq { it.copy(widen = (v * 20).roundToInt() / 20.0) } }
+            RowDivider()
+            SwitchRow("Peak limiter", "Last stage; catches any overs", eq.limiter, enabled = !pure) { v -> updEq { it.copy(limiter = v) } }
         }
-        if (autoEqOpen) item { AutoEqSearch { setAutoEq(false) } }
+    }
 
-        item(key = "soundpage-3", contentType = "static") {
-            Group("10-band graphic") {
-                EqConfig.GRAPHIC_FREQS.forEachIndexed { i, f ->
-                    SliderRow("${hz(f)} Hz", eq.graphic.getOrElse(i) { 0.0 }.toFloat(), -12f..12f, db(eq.graphic.getOrElse(i) { 0.0 }), enabled = eq.enabled && !pure) { v ->
-                        val r = (v * 2).roundToInt() / 2.0
-                        updEq { e -> e.copy(graphic = e.graphic.toMutableList().also { l -> while (l.size < 10) l.add(0.0); l[i] = r }, preset = "Custom") }
-                    }
-                }
-                TextButton(onClick = { updEq { it.copy(graphic = List(10) { 0.0 }, preset = "Flat") } }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Reset to flat") }
+    // 1.0.8: 3D Sound (Spatial 3D). Honest label: virtual speakers for stereo on headphones, not Dolby Atmos.
+    item(key = "soundpage-3d", contentType = "static") {
+        Group("3D Sound", footer = "For headphones. Places your stereo music in front of you, like two speakers in a room: wider image, " +
+            "head-shadowed crossfeed, a front cue and short early reflections. It's virtual spatial processing of your stereo music; " +
+            "it doesn't add surround or height channels the recording doesn't have. Mono sources stay as they are.") {
+            SwitchRow("Spatial 3D", if (pure) "Off while pure hi-res / bit-perfect output is on" else "HRTF-style headphone spatializer", s.spatial3d, enabled = !pure) { v ->
+                Graph.settings.update { it.copy(spatial3d = v) }
             }
+            SliderRow("Intensity", s.spatialIntensity, 0f..1f, "${(s.spatialIntensity * 100).roundToInt()}%", enabled = s.spatial3d && !pure,
+                subtitle = "Low = subtle crossfeed, high = wide and roomy") { v -> Graph.settings.update { it.copy(spatialIntensity = (v * 20).roundToInt() / 20f) } }
         }
+    }
 
-        item(key = "soundpage-4", contentType = "static") {
-            Group("Parametric") {
-                SwitchRow("Parametric bands", "Peak, shelf and pass filters with frequency, gain and Q (added on top of the graphic EQ)", eq.parametricOn, enabled = eq.enabled && !pure) { v -> updEq { it.copy(parametricOn = v) } }
-                if (eq.parametricOn) {
-                    eq.parametric.forEachIndexed { i, b ->
-                        RowDivider()
-                        ParamBandEditor(i, b, onChange = { nb -> updEq { e -> e.copy(parametric = e.parametric.toMutableList().also { it[i] = nb }, preset = if (e.preset.startsWith("AutoEq")) e.preset else "Custom") } },
-                            onRemove = { updEq { e -> e.copy(parametric = e.parametric.filterIndexed { j, _ -> j != i }) } })
-                    }
-                    Row(Modifier.padding(horizontal = 8.dp)) {
-                        TextButton(onClick = { updEq { e -> e.copy(parametric = e.parametric + ParamBandSetting(FilterType.PEAK, 1000.0, 0.0, 1.0)) } }, enabled = eq.parametric.size < 16) {
-                            Icon(Icons.Rounded.Add, null); Text("Add band")
-                        }
-                        TextButton(onClick = { updEq { e -> e.copy(parametric = EqSetting.DEFAULT_PARAMS) } }) { Text("Reset bands") }
-                    }
-                }
-            }
+    item(key = "soundpage-6", contentType = "static") {
+        Group("Enhance / Upscale", footer = buildString {
+            append("Enhance adds a gentle harmonic exciter above the cutoff a lossy file lost; it can't recover the original, so it's never labelled lossless. ")
+            append("Upscale resamples with a high-quality polyphase filter; a new rate starts with the next song. ")
+            if (Graph.lowEnd) append("This device reports low memory, so Enhance and Upscale stay off.")
+        }) {
+            ChoiceRow("Bandwidth extension", EnhanceLevel.entries, s.bwe, { it.name.lowercase().replaceFirstChar(Char::uppercase) }, enabled = !pure && !Graph.lowEnd) { v -> Graph.settings.update { it.copy(bwe = v) } }
+            RowDivider()
+            ChoiceRow("Upscale target", listOf(0) + rates, s.upscaleRate, { if (it == 0) "Off" else "${it / 1000} kHz" }, enabled = !pure && !Graph.lowEnd,
+                subtitle = "Only rates your current output reports are offered") { v -> Graph.settings.update { it.copy(upscaleRate = v) } }
+            RowDivider()
+            SwitchRow("Transient restore", "Subtly re-sharpens attacks softened by lossy encoding", s.transientRestore, enabled = !pure && !Graph.lowEnd) { v -> Graph.settings.update { it.copy(transientRestore = v) } }
         }
-
-        item(key = "soundpage-5", contentType = "static") {
-            Group("Gain & space") {
-                SliderRow("Preamp", eq.preampDb.toFloat(), -12f..6f, db(eq.preampDb), enabled = eq.enabled && !pure) { v -> updEq { it.copy(preampDb = (v * 2).roundToInt() / 2.0) } }
-                SwitchRow("Automatic headroom", "Lowers the preamp by the curve's highest boost so nothing clips", eq.autoHeadroom, enabled = eq.enabled && !pure) { v -> updEq { it.copy(autoHeadroom = v) } }
-                RowDivider()
-                SliderRow("Bass boost", eq.bassBoostDb.toFloat(), 0f..12f, if (eq.bassBoostDb == 0.0) "Off" else db(eq.bassBoostDb), enabled = eq.enabled && !pure,
-                    subtitle = "Low shelf at 90 Hz") { v -> updEq { it.copy(bassBoostDb = (v * 2).roundToInt() / 2.0) } }
-                SliderRow("Stereo widener", eq.widen.toFloat(), 0f..1f, if (eq.widen == 0.0) "Off" else "${(eq.widen * 100).roundToInt()}%", enabled = eq.enabled && !pure,
-                    subtitle = "Mild mid/side widening") { v -> updEq { it.copy(widen = (v * 20).roundToInt() / 20.0) } }
-                RowDivider()
-                SwitchRow("Peak limiter", "Last stage; catches any overs", eq.limiter, enabled = !pure) { v -> updEq { it.copy(limiter = v) } }
-            }
-        }
-
-        // 1.0.8: 3D Sound (Spatial 3D). Honest label: virtual speakers for stereo on headphones, not Dolby Atmos.
-        item(key = "soundpage-3d", contentType = "static") {
-            Group("3D Sound", footer = "For headphones. Places your stereo music in front of you, like two speakers in a room: wider image, " +
-                "head-shadowed crossfeed, a front cue and short early reflections. It's virtual spatial processing of your stereo music; " +
-                "it doesn't add surround or height channels the recording doesn't have. Mono sources stay as they are.") {
-                SwitchRow("Spatial 3D", if (pure) "Off while pure hi-res / bit-perfect output is on" else "HRTF-style headphone spatializer", s.spatial3d, enabled = !pure) { v ->
-                    Graph.settings.update { it.copy(spatial3d = v) }
-                }
-                SliderRow("Intensity", s.spatialIntensity, 0f..1f, "${(s.spatialIntensity * 100).roundToInt()}%", enabled = s.spatial3d && !pure,
-                    subtitle = "Low = subtle crossfeed, high = wide and roomy") { v -> Graph.settings.update { it.copy(spatialIntensity = (v * 20).roundToInt() / 20f) } }
-            }
-        }
-
-        item(key = "soundpage-6", contentType = "static") {
-            Group("Enhance / Upscale", footer = buildString {
-                append("Enhance adds a gentle harmonic exciter above the cutoff a lossy file lost; it can't recover the original, so it's never labelled lossless. ")
-                append("Upscale resamples with a high-quality polyphase filter; a new rate starts with the next song. ")
-                if (Graph.lowEnd) append("This device reports low memory, so Enhance and Upscale stay off.")
-            }) {
-                ChoiceRow("Bandwidth extension", EnhanceLevel.entries, s.bwe, { it.name.lowercase().replaceFirstChar(Char::uppercase) }, enabled = !pure && !Graph.lowEnd) { v -> Graph.settings.update { it.copy(bwe = v) } }
-                RowDivider()
-                ChoiceRow("Upscale target", listOf(0) + rates, s.upscaleRate, { if (it == 0) "Off" else "${it / 1000} kHz" }, enabled = !pure && !Graph.lowEnd,
-                    subtitle = "Only rates your current output reports are offered") { v -> Graph.settings.update { it.copy(upscaleRate = v) } }
-                RowDivider()
-                SwitchRow("Transient restore", "Subtly re-sharpens attacks softened by lossy encoding", s.transientRestore, enabled = !pure && !Graph.lowEnd) { v -> Graph.settings.update { it.copy(transientRestore = v) } }
-            }
-        }
+    }
 }
 
 /**

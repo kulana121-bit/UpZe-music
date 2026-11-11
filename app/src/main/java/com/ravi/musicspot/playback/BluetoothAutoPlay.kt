@@ -27,9 +27,14 @@ class BluetoothAutoPlay : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != BluetoothDevice.ACTION_ACL_CONNECTED) return
         val app = context.applicationContext as Application
-        val cls: BluetoothClass? = runCatching {
-            @Suppress("DEPRECATION") intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.bluetoothClass
-        }.getOrNull()
+        // 1.0.10 lint (MissingPermission): Android 12+ needs BLUETOOTH_CONNECT to read the device class. Without it the
+        // class stays unknown (null), exactly as when the old SecurityException was swallowed by runCatching.
+        val cls: BluetoothClass? =
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+                androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) null
+            else runCatching {
+                @Suppress("DEPRECATION") intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.bluetoothClass
+            }.getOrNull()
         if (cls != null && cls.majorDeviceClass != BluetoothClass.Device.Major.AUDIO_VIDEO) return
         val pending = goAsync()
         IoScope.launch {

@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
                 // flash): settings load before `ready` flips, so the first ready=true pair carries loaded settings.
                 val gate by remember {
                     kotlinx.coroutines.flow.combine(Graph.ready, Graph.settings.state) { r, st -> r to st }
-                }.collectAsState(initial = Graph.ready.value to Graph.settings.state.value)
+                }.collectAsState(initial = remember { Graph.ready.value to Graph.settings.state.value }) // 1.0.10 lint: initial snapshot read once, not on every recomposition
                 val (ready, s) = gate
                 if (!ready) {
                     com.ravi.musicspot.ui.theme.MusicSpotTheme(artUrl = null, dynamic = s.dynamicColor, mode = s.themeMode) {

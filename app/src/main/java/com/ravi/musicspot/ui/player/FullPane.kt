@@ -399,7 +399,7 @@ private fun FullPaneContent(initial: Pane, target: Pane?, visible: Boolean, onSe
                         PaneTabBar({ pager.currentPage + pager.currentPageOffsetFraction }, onTab = { i -> haptics.tick(); scope.launch { pager.animateScrollToPage(i) } })
                     }
                 }
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) { // 1.0.10 lint: constraints scope was unused
                     HorizontalPager(
                         state = pager, beyondViewportPageCount = 0, // 1.0.8 lighter: only the visible page is kept composed (was 1)
                         modifier = Modifier.fillMaxHeight().widthIn(max = 820.dp).fillMaxWidth().nestedScroll(pull),

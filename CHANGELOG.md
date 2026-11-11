@@ -12,6 +12,7 @@ internal 1.0.x numbers. Mapping: 1.0.7 = **v1.02** (versionCode 32), 1.0.8 = **v
 ## [v1.05] - 2026-11-11
 Pack 2A (tests/stability, part 1 of Pack 2):
 - Fixed the long-failing `PlaybackThreadingTest.playViaPlayerConnection`: a new queue whose seed song matched the previous queue's seed never got its autoplay radio (the per-seed guard now resets on playlist change), and the test's stale queue assertion was updated to the 1.0.7 smart-queue behaviour (played songs are kept above the playing song). Test tone lengthened so Robolectric's virtual clock cannot play it out mid-test.
+- Pack 2B: `./gradlew lintDebug` now runs and passes — 16 errors fixed (0 remain), no lint baseline added; 97 warnings remain as warnings.
 - No user-facing changes.
 
 ## [v1.04] - 2026-11-11

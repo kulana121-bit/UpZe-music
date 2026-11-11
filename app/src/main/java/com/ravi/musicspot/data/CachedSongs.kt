@@ -21,6 +21,7 @@ import java.io.File
  * no network at all. The cache is still a cache: the oldest songs make room for new ones once the limit is reached
  * (downloads are the permanent way to keep a song).
  */
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class]) // 1.0.10 lint: SimpleCache/ContentMetadata are @UnstableApi
 class CachedSongs(private val ctx: Context, dir: File) {
     @Serializable
     data class Entry(val track: Track, val cacheKey: String, val url: String, val info: StreamInfo, val atMs: Long)
