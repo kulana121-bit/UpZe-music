@@ -135,8 +135,8 @@ class PlaybackThreadingTest {
         // UI commands from a background thread are marshalled to main instead of touching the controller there.
         Thread { Graph.player.next() }.apply { start(); join() }
         waitFor("next via background call") { player.currentMediaItem?.mediaId == "yt:r1" }
-        // 1.0.2 smart queue: the played song leaves the queue, so the playing one is on top.
-        waitFor("played song removed") { player.currentMediaItemIndex == 0 && (0 until player.mediaItemCount).none { player.getMediaItemAt(it).mediaId == "yt:seed" } }
+        // 1.0.7 smart queue: the played song stays in the queue above the playing one (no longer removed), exactly once.
+        waitFor("played song kept above the playing one") { player.currentMediaItemIndex >= 1 && player.getMediaItemAt(0).mediaId == "yt:seed" && (0 until player.mediaItemCount).count { player.getMediaItemAt(it).mediaId == "yt:seed" } == 1 }
         assertNoThreadErrors()
         assertFalse(player.playWhenReady && player.playerError?.message?.contains("wrong thread") == true)
         println("API 29 PlayerConnection play OK: queue=${Graph.player.state.value.queue.map { it.id }}")
@@ -144,7 +144,9 @@ class PlaybackThreadingTest {
 
 
     private fun sineWav(f: File): File {
-        val rate = 44_100; val n = rate * 2
+        // 60 s of audio: every wait idles the main looper and advances Robolectric's virtual clock, so a 2 s tone could
+        // play out (auto-advancing to r1, r2…) before the "current is seed" / next() assertions ran.
+        val rate = 44_100; val n = rate * 60
         val data = java.nio.ByteBuffer.allocate(n * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         for (i in 0 until n) data.putShort((Math.sin(2 * Math.PI * 440 * i / rate) * 8000).toInt().toShort())
         val h = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN)

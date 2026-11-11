@@ -402,6 +402,9 @@ class PlaybackService : MediaSessionService() {
             loadSponsorSegments(mediaItem?.track())
             saveQueue()
             scheduleTidy() // 1.0.2: drop played songs and duplicates, then top up Infinite play
+            // 1.0.10: a new queue (setMediaItems / restore) whose current song has the same id as the previous seed
+            // must still get its radio; the per-seed guard only dedupes within one queue.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) autoplayFor = null
             maybeAutoplay()
         }
 

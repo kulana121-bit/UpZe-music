@@ -9,6 +9,11 @@ Public releases are tagged `v1.0x` on GitHub and that is the version name the ap
 internal 1.0.x numbers. Mapping: 1.0.7 = **v1.02** (versionCode 32), 1.0.8 = **v1.03** (versionCode 33),
 1.0.9 = **v1.04** (versionCode 34).
 
+## [v1.05] - 2026-11-11
+Pack 2A (tests/stability, part 1 of Pack 2):
+- Fixed the long-failing `PlaybackThreadingTest.playViaPlayerConnection`: a new queue whose seed song matched the previous queue's seed never got its autoplay radio (the per-seed guard now resets on playlist change), and the test's stale queue assertion was updated to the 1.0.7 smart-queue behaviour (played songs are kept above the playing song). Test tone lengthened so Robolectric's virtual clock cannot play it out mid-test.
+- No user-facing changes.
+
 ## [v1.04] - 2026-11-11
 _Internal 1.0.9 · versionCode 34. A fix pack: no new features, nothing removed._
 ### Fixed

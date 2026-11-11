@@ -45,8 +45,8 @@ android {
         applicationId = "com.ravi.musicspot"
         minSdk = 26
         targetSdk = 37
-        versionCode = 34 // v1.04 (internal 1.0.9): above v1.03 (33), so it installs over it
-        versionName = "v1.04" // keep equal to the GitHub release tag
+        versionCode = 35 // v1.05 (internal 1.0.10): above v1.04 (34), so it installs over it
+        versionName = "v1.05" // keep equal to the GitHub release tag
         vectorDrawables.useSupportLibrary = true
     }
 
