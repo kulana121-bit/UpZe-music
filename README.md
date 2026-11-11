@@ -4,7 +4,7 @@
 
 # UpZe
 
-**A free, open-source music player for Android and iOS that streams legal catalogues, plays your own files and servers, and runs every song through a real sound engine.**
+**A free, open-source music player for Android (plus an experimental iOS build) that streams legal catalogues, plays your own files and servers, and runs every song through a real sound engine.**
 
 [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B%20(minSdk%2026)-3DDC84?logo=android&logoColor=white)](#download--install)
 [![iOS 15+](https://img.shields.io/badge/iOS-15%2B-000000?logo=apple&logoColor=white)](#ios-iphone--ipad)
@@ -24,7 +24,7 @@ JioSaavn and other free catalogues, from the music on your phone and from your o
 server, imports your Spotify and YouTube Music libraries, and gives you an EQ, AutoEq headphone profiles and an honest
 upscaler. No ads, no telemetry, no account required.
 
-The same project also ships on **iOS**: the Kotlin Multiplatform + Compose Multiplatform port lives in
+The project also has an **experimental iOS build**: the Kotlin Multiplatform + Compose Multiplatform port lives in
 [UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP), and the latest release carries the Android APK, and the v1.02 release carries the iOS IPA (see [iOS install](#ios-iphone--ipad)). Both platforms share one identity — package/bundle ID
 `com.ravi.musicspot` — so updates always install in place and keep your data.
 
@@ -129,9 +129,11 @@ Repository fingerprint (SHA-256): `3FAD223C53DB20A0C3EEC33A825F6A3786A7FC8EF501A
 
 ### iOS (iPhone & iPad)
 
-UpZe also runs on iOS 15 or newer, built from the shared Kotlin Multiplatform codebase in
+An experimental iOS 15+ build exists, built from the shared Kotlin Multiplatform codebase in
 [UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP). The iOS build is an **unsigned IPA**, so it is installed with a
 sideloading tool instead of the App Store.
+
+**Honest status: this iOS build has not yet been tested on a real iPhone or iPad. Android is the primary, supported platform.**
 
 **Option 1 — AltStore or SideStore (recommended, updates included)**
 
@@ -226,7 +228,7 @@ AGP 9.3 · JUnit 4 & Robolectric.
 
 ## Roadmap
 
-- [x] iOS app — Kotlin Multiplatform build, distributed as a sideload IPA with an AltStore/SideStore source
+- [x] iOS app (experimental, not yet device-tested) — Kotlin Multiplatform build, distributed as a sideload IPA with an AltStore/SideStore source
 - [x] F-Droid distribution — own F-Droid repo with automatic updates (official F-Droid catalogue listing still pending)
 - [ ] Android Auto browsing
 - [ ] More widget sizes and a lock-screen lyrics view
