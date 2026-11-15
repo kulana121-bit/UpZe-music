@@ -24,9 +24,11 @@ JioSaavn and other free catalogues, from the music on your phone and from your o
 server, imports your Spotify and YouTube Music libraries, and gives you an EQ, AutoEq headphone profiles and an honest
 upscaler. No ads, no telemetry, no account required.
 
-The project also has an **experimental iOS build**: the Kotlin Multiplatform + Compose Multiplatform port lives in
-[UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP), and the latest release carries the Android APK, and the v1.02 release carries the iOS IPA (see [iOS install](#ios-iphone--ipad)). Both platforms share one identity — package/bundle ID
-`com.ravi.musicspot` — so updates always install in place and keep your data.
+The latest release also plays video songs, offers AI-powered mixes and recommendations with your own API key, and
+includes podcasts. The project also has an **experimental iOS build**: the Kotlin Multiplatform + Compose
+Multiplatform port lives in [UpZe-KMP](https://github.com/kulana121-bit/UpZe-KMP), and the latest release carries the
+Android APK, and the v1.02 release carries the iOS IPA (see [iOS install](#ios-iphone--ipad)). Both platforms share one
+identity — package/bundle ID `com.ravi.musicspot` — so updates always install in place and keep your data.
 
 ## Preview
 
@@ -71,7 +73,8 @@ The project also has an **experimental iOS build**: the Kotlin Multiplatform + C
 Sources can be switched on/off and re-ordered. The router plays from your priority order and fails over to the next
 match when a source can't play a song (ISRC when present, otherwise title/artist/duration with remix/live/cover guards).
 Queue with reorder, play next, shuffle, repeat, Infinite play, gapless or 0–12 s crossfade; sleep timer with fade;
-downloads (WorkManager, Wi-Fi-only option) and an offline mode.
+playback speed with pitch control (0.5–2×); up to 10 named queues you can switch between; save the whole queue as a
+playlist; downloads (WorkManager, Wi-Fi-only option) with synced lyrics saved for offline listening.
 
 ### Sound engine & EQ
 - Software engine inside ExoPlayer: 10-band graphic EQ, parametric EQ, presets, A/B bypass, preamp with auto headroom,
@@ -81,6 +84,8 @@ downloads (WorkManager, Wi-Fi-only option) and an offline mode.
   restore — labelled "Upscaled"/"Enhanced", never "Lossless".
 - **3D Sound (Spatial 3D)**: HRTF-style spatial rendering for headphones — widening, crossfeed, pinna cues and a
   synthetic room, with an intensity slider. Virtual speakers for stereo; never labelled Atmos.
+- Loudness normalisation and ReplayGain through one gain stage, so tracks play at even volume without ever
+  double-applying gain (both off by default).
 - Pure hi-res output, and bit-perfect USB DAC mode on Android 14+.
 
 ### Lyrics
@@ -91,19 +96,45 @@ downloads (WorkManager, Wi-Fi-only option) and an offline mode.
 - **Motion Lyrics** mode: a kinetic full-screen lyric stage over the artwork, driven by the engine's own beat and
   tone metering.
 
+### Video songs
+- Switch any song to its video with the Song|Video capsule — playback continues at the same position, and switching
+  quality mid-video never restarts the song.
+- The quality sheet lists Auto plus only the renditions that actually exist and your phone can decode; auto cap
+  1080p on Wi-Fi, 720p on low-RAM devices, 480p on mobile data.
+- Ambient mode: soft light from the video glows around the player.
+- Any video error falls back once to the song at the same position.
+
+### AI, discovery & podcasts
+- AI across the app with your own API key (Settings › AI Integration): More like this, Continue queue, Extend
+  playlist, Ask for songs, mood mixes and About this song. No account sign-in needed.
+- Personalised Home: time-aware greeting, Jump back in, top artists, Made-for-you daily mixes, Forgotten favourites
+  and More-like rows — all from on-device listening data.
+- Wrapped Anytime: your top songs, artists and listening stats whenever you want them.
+- Podcasts in Explore, with episode lists and show pages.
+- **What's playing**: tap it in Search to recognise the music around you — no API key needed, and only a fingerprint
+  of peaks ever leaves the phone, never the audio.
+- **DJ Mode** (off by default): beat-matched transitions between songs using real detected BPM, with tempo changes
+  capped at ±6%.
+- **Listen Together**: listen in sync with friends over a shared room code.
+
 ### UI, dock & motion
 - Material 3 with dynamic colour from the artwork; Dark, Light, System and Pure black themes.
 - Liquid-glass surfaces (lens refraction on Android 13+, blur on 12, tinted fallback on older devices).
 - Several Home, Now Playing and dock designs to pick from at first launch or in Settings › Appearance.
 - One shared Material-motion spec for sheets, dialogs, menus and page transitions; Reduce motion makes them instant.
+- Effects setting (Auto / Full / Lite) to match animation load to your phone.
 - Tablet layout with a side rail.
 
-### Home-screen widget
-- Now-playing widget with artwork-tinted card, title/artist and previous / play-pause / next.
+### Home-screen widgets
+- Four widgets: Now Playing, Compact (4×1), Stats and Shortcuts — all with artwork-tinted cards and working controls.
+
+### Android Auto
+- Browse your library, playlists and queues from your car's screen through the Android Auto media browser.
 
 ### Accounts & updates
 - Optional Google (YouTube Music library) and Spotify sign-in through locked-down WebViews; cookies are encrypted with
   an Android Keystore key and excluded from backups. Everything works as a guest.
+- Privacy controls: recent searches on/off, listening-history retention, and reset your YouTube visitor ID.
 - Built-in updater: checks GitHub Releases (at most every 12 h, or from Settings › About › Check for updates), shows
   the release notes, downloads the APK and hands it to the system installer.
 - On iOS, updates arrive through the AltStore/SideStore source (see [iOS install](#ios-iphone--ipad)) and install in
@@ -111,11 +142,15 @@ downloads (WorkManager, Wi-Fi-only option) and an offline mode.
 
 ## Download & install
 
-1. Open the [latest release](https://github.com/kulana121-bit/UpZe-music/releases) and download `UpZe-vX.Y.Z.apk`.
+1. Open the [latest release](https://github.com/kulana121-bit/UpZe-music/releases) and download the APK that fits
+   your phone: **full** (everything, including the in-app updater and the Monochrome/Qobuz sources) or **foss**
+   (F-Droid-friendly: no updater, no Monochrome/Qobuz). Pick your processor — `arm64-v8a` for most modern phones,
+   `armeabi-v7a` for older 32-bit phones, `x86`/`x86_64` for emulators and Intel devices — or grab `universal`,
+   which runs everywhere.
 2. Open the APK on your phone. If asked, allow your browser or file manager to **install unknown apps**.
 3. Tap **Install**. Later versions install over it and keep your data, and the app tells you when one is out.
 
-Requirements: Android 8.0 (API 26) or newer (one APK for arm64-v8a, armeabi-v7a, x86 and x86_64).
+Requirements: Android 8.0 (API 26) or newer.
 
 > Coming from MusicSpot? UpZe keeps the package name `com.ravi.musicspot` and the same signing key, so it installs
 > over MusicSpot 2.0.x and keeps your library, settings and sign-ins.
@@ -128,6 +163,8 @@ UpZe also has its own F-Droid repository, so the F-Droid app can install it and 
 2. In F-Droid, open **Settings → Repositories → +** and add this address:
    `https://kulana121-bit.github.io/upze-fdroid-repo/repo?fingerprint=3FAD223C53DB20A0C3EEC33A825F6A3786A7FC8EF501ADDE0930EFB3DD93A8C6`
 3. Search for **UpZe** and install it.
+
+The repository carries the foss flavor (no in-app updater, no Monochrome/Qobuz sources).
 
 Repository fingerprint (SHA-256): `3FAD223C53DB20A0C3EEC33A825F6A3786A7FC8EF501ADDE0930EFB3DD93A8C6`. The APKs in the repo are signed with the same permanent key as the GitHub releases above, so an F-Droid install updates a GitHub install in place (and the other way round) with your library and settings intact.
 
@@ -193,7 +230,7 @@ The release build fails rather than fall back to the debug key.
 2. Build `:app:assembleRelease` signed with **the same key** as every earlier release (Android refuses an update
    signed with a different key) and keep the R8 `mapping.txt`.
 3. Create a GitHub Release with the tag `vX.Y.Z` (matching `versionName`), paste the changelog entry as the notes, and
-   attach the signed APK (`UpZe-vX.Y.Z.apk`). Don't mark it as a pre-release.
+   attach the signed APKs (full and foss flavors, per-ABI plus universal). Don't mark it as a pre-release.
 4. Installed copies find it through the in-app updater (`/releases/latest`, first `.apk` asset).
 
 ## Project structure
@@ -202,17 +239,21 @@ The release build fails rather than fall back to the debug key.
 app/src/main/java/com/ravi/musicspot/
 ├── App.kt, MainActivity.kt   Process-wide Graph (stores, sources, player), entry activity
 ├── account/                  Encrypted account store, Google/Spotify sessions, library sync
+├── ai/                       AI-powered mixes (API-key powered)
 ├── core/                     HTTP client, crash guard, encryption, JSON files, playback log, links
 ├── data/                     Settings, library, downloads, home feed, play stats, AutoEq
 ├── dsp/                      Sound engine: EQ, limiter, resampler, enhancers
-├── logic/                    Pure logic: queue, sleep timer, search, taste, contrast
+├── logic/                    Pure logic: queue, sleep timer, search, taste, contrast, DJ transitions, Wrapped stats
 ├── lyrics/                   Lyrics providers, LRC parsing, romaniser, cache
-├── playback/                 MediaSessionService, ExoPlayer setup, chunked data source, engine processor
+├── model/                    Track data model
+├── playback/                 MediaSessionService, ExoPlayer setup, video songs, chunked data source, engine processor
+├── recognition/              What's playing recognition (Shazam audio signature)
 ├── source/                   Music sources and the router (YouTube, JioSaavn, local, servers, …)
 ├── spotify/                  Spotify library import (metadata only)
+├── together/                 Listen Together rooms (synced listening)
 ├── ui/                       Compose UI: screens, player designs, docks, settings, motion, glass, theme
 ├── update/                   In-app updater (GitHub Releases)
-├── widget/                   Home-screen now-playing widget
+├── widget/                   Four home-screen widgets (Now Playing, Compact, Stats, Shortcuts)
 └── yt/                       YouTube Music Innertube client, parser, stream resolver, NewPipe bridge
 app/src/test/                 Unit tests (routing, DSP, lyrics, logic, updater, Robolectric start-up)
 ```
@@ -234,8 +275,9 @@ AGP 9.3 · JUnit 4 & Robolectric.
 
 - [x] iOS app (experimental, not yet device-tested) — Kotlin Multiplatform build, distributed as a sideload IPA with an AltStore/SideStore source
 - [x] F-Droid distribution — own F-Droid repo with automatic updates (official F-Droid catalogue listing still pending)
-- [ ] Android Auto browsing
-- [ ] More widget sizes and a lock-screen lyrics view
+- [x] Android Auto browsing
+- [x] More widget sizes — four widgets: Now Playing, Compact, Stats, Shortcuts
+- [ ] Lock-screen lyrics view
 - [ ] Translations
 - [ ] Fix SoundCloud once NewPipe Extractor supports it again
 
@@ -255,6 +297,7 @@ UpZe stands on the shoulders of these projects (full list in [THIRD_PARTY_NOTICE
 - [AndroidX Media3 / ExoPlayer](https://github.com/androidx/media) — playback and media session (Apache-2.0)
 - [Kyant Backdrop](https://github.com/Kyant0/AndroidLiquidGlass) and [Haze](https://github.com/chrisbanes/haze) — liquid glass and blur (Apache-2.0)
 - [AutoEq](https://github.com/jaakkopasanen/AutoEq) — headphone correction profiles (MIT)
+- [SongRec](https://github.com/marin-m/SongRec) — Shazam audio signature for What's playing recognition (GPL-3.0)
 - [LRCLIB](https://lrclib.net) — synced lyrics
 - [Coil](https://github.com/coil-kt/coil), [OkHttp](https://github.com/square/okhttp), [kotlinx](https://github.com/Kotlin) — images, networking, serialization, coroutines
 
