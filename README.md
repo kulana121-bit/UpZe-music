@@ -143,10 +143,9 @@ playlist; downloads (WorkManager, Wi-Fi-only option) with synced lyrics saved fo
 ## Download & install
 
 1. Open the [latest release](https://github.com/kulana121-bit/UpZe-music/releases) and download the APK that fits
-   your phone: **full** (everything, including the in-app updater and the Monochrome/Qobuz sources) or **foss**
-   (F-Droid-friendly: no updater, no Monochrome/Qobuz). Pick your processor — `arm64-v8a` for most modern phones,
-   `armeabi-v7a` for older 32-bit phones, `x86`/`x86_64` for emulators and Intel devices — or grab `universal`,
-   which runs everywhere.
+   your phone. Pick your processor — `arm64-v8a` for most modern phones, `armeabi-v7a` for older 32-bit phones,
+   `x86`/`x86_64` for emulators and Intel devices — or grab `universal`, which runs everywhere. (The **foss**
+   flavor, without the in-app updater and the Monochrome/Qobuz sources, lives in the F-Droid repository below.)
 2. Open the APK on your phone. If asked, allow your browser or file manager to **install unknown apps**.
 3. Tap **Install**. Later versions install over it and keep your data, and the app tells you when one is out.
 
@@ -230,7 +229,8 @@ The release build fails rather than fall back to the debug key.
 2. Build `:app:assembleRelease` signed with **the same key** as every earlier release (Android refuses an update
    signed with a different key) and keep the R8 `mapping.txt`.
 3. Create a GitHub Release with the tag `vX.Y.Z` (matching `versionName`), paste the changelog entry as the notes, and
-   attach the signed APKs (full and foss flavors, per-ABI plus universal). Don't mark it as a pre-release.
+   attach the signed full-flavor APKs (per-ABI plus universal). The foss flavor ships through the F-Droid
+   repository, not the GitHub release. Don't mark it as a pre-release.
 4. Installed copies find it through the in-app updater (`/releases/latest`, first `.apk` asset).
 
 ## Project structure
