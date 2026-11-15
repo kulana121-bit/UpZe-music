@@ -36,15 +36,15 @@ identity — package/bundle ID `com.ravi.musicspot` — so updates always instal
 
 | Home | Explore | Library |
 |:---:|:---:|:---:|
-| <img src="docs/screenshots/preview-home.jpg" width="250" alt="UpZe — Home screen (personalised: greeting, continue listening, on repeat)" /> | <img src="docs/screenshots/preview-explore.jpg" width="250" alt="UpZe — Explore screen" /> | <img src="docs/screenshots/preview-library.jpg" width="250" alt="UpZe — Library screen" /> |
+| <img src="docs/screenshots/preview-home.jpg" width="250" alt="UpZe — Home screen (Good afternoon greeting, Jump back in, On repeat)" /> | <img src="docs/screenshots/preview-explore.jpg" width="250" alt="UpZe — Explore screen (moods and genres, podcasts)" /> | <img src="docs/screenshots/preview-library.jpg" width="250" alt="UpZe — Library screen (liked songs, downloads, history, stats, AI Mix)" /> |
 
-| Now Playing | Search | Settings |
+| Now Playing | Queue | Related |
 |:---:|:---:|:---:|
-| <img src="docs/screenshots/preview-now-playing.jpg" width="250" alt="UpZe — Now Playing screen" /> | <img src="docs/screenshots/preview-search.jpg" width="250" alt="UpZe — Search across sources" /> | <img src="docs/screenshots/preview-settings.jpg" width="250" alt="UpZe — Settings screen" /> |
+| <img src="docs/screenshots/preview-now-playing.jpg" width="250" alt="UpZe — Now Playing with Song and Video switch (video mode)" /> | <img src="docs/screenshots/preview-queue.jpg" width="250" alt="UpZe — Queue (Up next, Infinite play, drag to reorder)" /> | <img src="docs/screenshots/preview-related.jpg" width="250" alt="UpZe — Related (You might also like, recommended playlists)" /> |
 
 | Motion Lyrics | Lyrics |
 |:---:|:---:|
-| <img src="docs/screenshots/motion-lyrics.gif" width="250" alt="UpZe — Motion Lyrics (animated)" /> | <img src="docs/screenshots/preview-lyrics.jpg" width="250" alt="UpZe — Lyrics screen" /> |
+| <img src="docs/screenshots/motion-lyrics.gif" width="250" alt="UpZe — Motion Lyrics (animated)" /> | <img src="docs/screenshots/preview-lyrics.jpg" width="250" alt="UpZe — Lyrics screen (word-synced, offset controls)" /> |
 
 </div>
 
