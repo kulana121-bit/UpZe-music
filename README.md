@@ -12,8 +12,9 @@
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/badge/release-v1.04-FF5358)](https://github.com/kulana121-bit/UpZe-music/releases)
+[![Telegram](https://img.shields.io/badge/Telegram-UpZe-26A5E4?logo=telegram&logoColor=white)](https://t.me/upzemusic)
 
-[Download](https://github.com/kulana121-bit/UpZe-music/releases) · [Features](#features) · [Build](#build-from-source) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+[Download](https://github.com/kulana121-bit/UpZe-music/releases) · [Features](#features) · [Build](#build-from-source) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Telegram](https://t.me/upzemusic)
 
 </div>
 
@@ -164,6 +165,8 @@ UpZe also has its own F-Droid repository, so the F-Droid app can install it and 
 3. Search for **UpZe** and install it.
 
 The repository carries the foss flavor (no in-app updater, no Monochrome/Qobuz sources).
+
+News, release announcements, and support: join the [Telegram channel](https://t.me/upzemusic).
 
 Repository fingerprint (SHA-256): `3FAD223C53DB20A0C3EEC33A825F6A3786A7FC8EF501ADDE0930EFB3DD93A8C6`. The APKs in the repo are signed with the same permanent key as the GitHub releases above, so an F-Droid install updates a GitHub install in place (and the other way round) with your library and settings intact.
 
