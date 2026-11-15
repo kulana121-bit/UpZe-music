@@ -23,7 +23,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- 1.0.0 in-app updater: hands a downloaded release APK to the system installer (user confirms). -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- In-app updater: REQUEST_INSTALL_PACKAGES is declared in src/full/AndroidManifest.xml (not in foss). -->
 
     <queries>
         <intent><action android:name="android.speech.RecognitionService" /></intent>

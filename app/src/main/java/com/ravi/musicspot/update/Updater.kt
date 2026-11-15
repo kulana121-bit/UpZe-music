@@ -63,6 +63,7 @@ object Updater {
 
     /** App start: checks only when the setting is on and the last check is older than 12 h. Never throws. */
     fun checkOnStart(ctx: Context) {
+        if (!com.ravi.musicspot.core.Distribution.updaterEnabled()) return // foss (F-Droid updates the app)
         val app = ctx.applicationContext
         IoScope.launch {
             runCatching {
@@ -79,6 +80,7 @@ object Updater {
 
     /** Checks GitHub now on Dispatchers.IO. Manual checks also offer a version the user skipped before. */
     suspend fun check(ctx: Context, manual: Boolean): Result = withContext(Dispatchers.IO) {
+        if (!com.ravi.musicspot.core.Distribution.updaterEnabled()) return@withContext Result.UP_TO_DATE // foss
         val app = ctx.applicationContext
         _checking.value = true
         try {

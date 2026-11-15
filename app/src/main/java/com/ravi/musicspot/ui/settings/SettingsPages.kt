@@ -358,7 +358,8 @@ fun AboutPage() {
                 }
             }
         }
-        item(key = "settingspages-22", contentType = "static") {
+        // The foss (F-Droid) build has no in-app updater, so no Updates group.
+        if (com.ravi.musicspot.core.Distribution.updaterEnabled()) item(key = "settingspages-22", contentType = "static") {
             // 1.0.0: in-app updates from GitHub Releases.
             Group("Updates") {
                 NavRow(androidx.compose.material.icons.Icons.Rounded.SystemUpdate, "Check for updates", if (checking) "Checking…" else "Looks for a newer UpZe release on GitHub") {

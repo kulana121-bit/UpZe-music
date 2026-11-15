@@ -50,6 +50,22 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    // Two distributions: "full" (GitHub) has the in-app APK updater (REQUEST_INSTALL_PACKAGES lives in
+    // src/full/AndroidManifest.xml); "foss" (F-Droid) has no updater — F-Droid updates the app. Code checks
+    // BuildConfig.IS_FOSS through core/Distribution.kt.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("full") {
+            dimension = "distribution"
+            isDefault = true
+            buildConfigField("Boolean", "IS_FOSS", "false")
+        }
+        create("foss") {
+            dimension = "distribution"
+            buildConfigField("Boolean", "IS_FOSS", "true")
+        }
+    }
+
     signingConfigs {
         create("release") {
             if (releaseStoreFile != null) {

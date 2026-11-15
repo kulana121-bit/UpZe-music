@@ -26,19 +26,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install SDK platform 37 and build-tools 36.0.0
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1); fi
-          echo "Installed platforms:"; ls "$ANDROID_HOME/platforms" || true
-          echo "Installed build-tools:"; ls "$ANDROID_HOME/build-tools" || true
-          "$SDKMANAGER" --list 2>/dev/null | grep -E "platforms;android-3[0-9]" | head -8 || true
-          yes | "$SDKMANAGER" --licenses > /dev/null || true
-          if [ -d "$ANDROID_HOME/platforms/android-37" ] && [ -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
-            echo "SDK platform 37 and build-tools 36.0.0 already installed"
-          else
-            "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0" || "$SDKMANAGER" --channel=3 "platforms;android-37" "build-tools;36.0.0" || "$SDKMANAGER" "platforms;android-37.0" "build-tools;36.0.0"
-          fi
+        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
 
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
@@ -47,16 +39,18 @@ jobs:
         run: ./gradlew --stacktrace :app:assembleDebug
 
       - name: Unit tests
-        run: ./gradlew --stacktrace :app:testDebugUnitTest
+        # Flavours split the task per variant: testFullDebugUnitTest + testFossDebugUnitTest.
+        run: ./gradlew --stacktrace :app:testFullDebugUnitTest :app:testFossDebugUnitTest
 
       - name: Lint
-        run: ./gradlew --stacktrace :app:lintDebug
+        # Same split as the tests above.
+        run: ./gradlew --stacktrace :app:lintFullDebug :app:lintFossDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: UpZe-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
 
       - name: Upload test and lint reports
